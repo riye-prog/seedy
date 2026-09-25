@@ -1,0 +1,110 @@
+{
+  "version": "0.6.0",
+  "native_interaction": "passed: existing controls, dimension selection, matching target catalogs, both End-city ship filters, copying elytra coordinates, clearing stale results, Nether biome searches",
+  "windows_runtime": "not tested",
+  "versions": {
+    "26.2": {
+      "tests": 30,
+      "sha256": "d46299de206eb09265b1d1ced2a390f122e4c3a589e459e53ea8cd7153529abf",
+      "bytes": 2945130,
+      "native_binaries_verified": true,
+      "fabric_dimension_smoke_passed": true
+    },
+    "26.3": {
+      "tests": 30,
+      "sha256": "e89b77accdc7bc2d7f3d443b2f25000c0bb65b5aa43353d6d989aceef86371fe",
+      "bytes": 2945576,
+      "native_binaries_verified": true,
+      "fabric_dimension_smoke_passed": true
+    }
+  },
+  "ancient_city_regression": {
+    "seed": "2589511696370800371",
+    "version": "26.2",
+    "rejected_old_xz": [
+      [
+        -632,
+        -584
+      ],
+      [
+        -312,
+        56
+      ]
+    ],
+    "generated_piece_positions": [
+      [
+        -596,
+        -37,
+        -240
+      ],
+      [
+        -720,
+        -37,
+        188
+      ],
+      [
+        -251,
+        -37,
+        -160
+      ]
+    ],
+    "method": "vanilla placement and structure-start generation; no live-world assertion"
+  },
+  "macos_runtime": "26.2 and 26.3 real Fabric clients passed dimension and End-city filter checks, plus the existing 384-case loot regression",
+  "native_builds": [
+    "macos arm64 and x86_64 universal dylib",
+    "windows x86_64 dll"
+  ],
+  "loot_validation": {
+    "seed": "2589511696370800371",
+    "checks": [
+      "ancient-city chest seeds compared with vanilla placement",
+      "desert-temple chest seeds compared with vanilla placement across rotations and chunk borders",
+      "128 loot-seed cases compared with vanilla desert-pyramid and ice-box loot tables per version",
+      "structure-total filter boundaries and locator integration"
+    ],
+    "limitations": [
+      "normal player luck and fresh vanilla generation",
+      "terrain-dependent sculk-affected chests are marked unavailable and excluded from totals",
+      "custom loot tables, changed or looted chests, and chunks generated in older versions can differ"
+    ]
+  },
+  "fabric_loot_regression": {
+    "original_error_reproduced": true,
+    "cause": "Fabric loot-table wrapper requires a ServerLevel for holder lookup",
+    "fix": "Evaluate vanilla loot pools directly, preserving seeded functions and vanilla chest arrangement",
+    "versions": {
+      "26.2": {
+        "loot_cases": 384,
+        "matching_cities": 3,
+        "server_loot_events_called": false,
+        "passed": true
+      },
+      "26.3": {
+        "loot_cases": 384,
+        "matching_cities": 3,
+        "server_loot_events_called": false,
+        "passed": true
+      }
+    }
+  },
+  "dimension_search": {
+    "seed": "2589511696370800371",
+    "end_origin": [
+      3200,
+      72,
+      3200
+    ],
+    "radius": 2048,
+    "with_ship": 5,
+    "without_ship": 6,
+    "checks": [
+      "dimension-specific structure and biome catalogs",
+      "Nether fortress and bastion selection preserves vanilla weighted generation",
+      "biome sampling remains correct after dimension and seed changes",
+      "End-city ship filters compared with generated ship templates",
+      "elytra marker coordinates lie within generated ships",
+      "new End-city synchronization mixin verified in real Fabric clients"
+    ]
+  }
+}

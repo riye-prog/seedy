@@ -1,0 +1,9 @@
+.gradle/
+build/
+versions/*/build/
+versions/*/run/
+versions/*/bin/
+versions/*/logs/
+native/build*/
+native/dist/
+.DS_Store

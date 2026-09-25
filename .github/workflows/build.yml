@@ -1,0 +1,47 @@
+name: Build Seedy
+on: [push, pull_request, workflow_dispatch]
+jobs:
+  native:
+    strategy:
+      matrix:
+        os: [macos-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '25'
+      - name: Configure macOS
+        if: runner.os == 'macOS'
+        run: cmake -S native -B native/build -DCMAKE_BUILD_TYPE=Release '-DCMAKE_OSX_ARCHITECTURES=arm64;x86_64' -DJAVA_HOME="$JAVA_HOME"
+      - name: Configure Windows
+        if: runner.os == 'Windows'
+        run: cmake -S native -B native/build -A x64
+      - run: cmake --build native/build --config Release
+      - name: Test native interaction
+        if: runner.os == 'macOS'
+        run: ctest --test-dir native/build --output-on-failure
+      - uses: actions/upload-artifact@v4
+        with:
+          name: native-${{ runner.os }}
+          path: native/dist/
+  mod:
+    needs: native
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '25'
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: native-*
+          merge-multiple: true
+          path: native/dist/
+      - run: ./gradlew :26.2:build :26.3:build
+      - uses: actions/upload-artifact@v4
+        with:
+          name: seedy-mods
+          path: versions/*/build/libs/*.jar

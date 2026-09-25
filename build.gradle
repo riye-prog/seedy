@@ -1,0 +1,36 @@
+plugins { id 'net.fabricmc.fabric-loom' version '1.17.21' }
+version = "0.6.0+${project.name}"
+group = 'dev.seedy'
+base.archivesName = 'seedy'
+repositories { mavenCentral() }
+loom {
+    runs {
+        client {
+            if (project.hasProperty('seedySmoke')) vmArg '-Dseedy.smoke=true'
+            if (project.hasProperty('seedyLootSmoke')) vmArg '-Dseedy.lootSmoke=true'
+            if (project.hasProperty('seedyRunDir')) runDir project.property('seedyRunDir')
+        }
+    }
+}
+sourceSets.main.java.srcDir rootProject.file("src/compat/${project.name}")
+dependencies {
+    minecraft "com.mojang:minecraft:${project.name}"
+    implementation 'net.fabricmc:fabric-loader:0.19.3'
+    implementation "net.fabricmc.fabric-api:fabric-api:0.161.0+${project.name}"
+    testImplementation 'org.junit.jupiter:junit-jupiter:5.13.4'
+    testRuntimeOnly 'org.junit.platform:junit-platform-launcher'
+}
+tasks.withType(JavaCompile).configureEach { options.release = 25 }
+java { toolchain.languageVersion = JavaLanguageVersion.of(25) }
+test { useJUnitPlatform() }
+jar {
+    include 'dev/seedy/**', 'assets/seedy/**', 'fabric.mod.json', 'seedy.mixins.json', 'natives/**', 'licenses/**', 'META-INF/MANIFEST.MF'
+}
+processResources {
+    inputs.property 'modVersion', project.version
+    inputs.property 'minecraftVersion', project.name
+    from(rootProject.file('src/main/fabric.mod.json')) { expand version: project.version, minecraft: project.name }
+    from(rootProject.file('native/dist')) { into 'natives' }
+    from(rootProject.file('native/licenses')) { into 'licenses' }
+    from(rootProject.file('vendor/seedcrackerx/LICENSE')) { into 'licenses'; rename { 'seedcrackerx-reference-LICENSE' } }
+}

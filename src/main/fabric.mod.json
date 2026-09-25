@@ -1,0 +1,12 @@
+{
+  "schemaVersion": 1,
+  "id": "seedy",
+  "version": "${version}",
+  "name": "Seedy",
+  "description": "Seed recovery and world-generation tools with an in-process native interface.",
+  "environment": "client",
+  "license": "MIT",
+  "entrypoints": { "client": ["dev.seedy.SeedyClient"] },
+  "mixins": ["seedy.mixins.json"],
+  "depends": { "fabricloader": ">=0.19.3", "minecraft": "${minecraft}", "java": ">=25", "fabric-api": "*" }
+}
