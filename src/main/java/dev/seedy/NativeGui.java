@@ -38,7 +38,7 @@ public final class NativeGui {
     }
 
     public static boolean wantsFrame() {
-        return !failed && (Minecraft.getInstance().gui.screen() instanceof OverlayScreen || LoadedObjects.active());
+        return !failed && (Minecraft.getInstance().gui.screen() instanceof OverlayScreen || LoadedObjects.active() || loaded && !INPUT.isEmpty());
     }
 
     public static void vulkanAvailable() { vulkanSeen = true; }

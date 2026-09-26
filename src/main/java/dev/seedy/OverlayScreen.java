@@ -13,7 +13,7 @@ public final class OverlayScreen extends Screen {
     public OverlayScreen() { super(Component.literal("Seedy")); NativeGui.event(5, 1, 0, 0); }
     @Override public void extractRenderState(GuiGraphicsExtractor graphics, int mouseX, int mouseY, float delta) { }
     @Override public boolean isPauseScreen() { return false; }
-    @Override public void removed() { NativeGui.event(5, 0, 0, 0); }
+    @Override public void removed() { Workbench.INSTANCE.stopMap(); NativeGui.event(5, 0, 0, 0); }
     @Override public void mouseMoved(double x, double y) {
         var window = Minecraft.getInstance().getWindow();
         NativeGui.event(0, framebufferCoordinate(x, window.getWidth(), window.getGuiScaledWidth()), framebufferCoordinate(y, window.getHeight(), window.getGuiScaledHeight()), 0);

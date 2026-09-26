@@ -45,6 +45,11 @@ final class WorldgenAdapter {
         return new net.minecraft.server.packs.resources.MultiPackResourceManager(net.minecraft.server.packs.PackType.SERVER_DATA, java.util.List.of(net.minecraft.server.packs.repository.ServerPacksSource.createVanillaPackSource()));
     }
 
+    static java.util.Optional<net.minecraft.world.level.levelgen.structure.Structure.GenerationStub> startPoint(net.minecraft.core.Holder<net.minecraft.world.level.levelgen.structure.Structure> holder, net.minecraft.core.RegistryAccess registries, Locator.StructureWorld world, net.minecraft.world.level.levelgen.structure.templatesystem.StructureTemplateManager templates, long seed, net.minecraft.world.level.ChunkPos position) {
+        var context = new net.minecraft.world.level.levelgen.structure.Structure.GenerationContext(registries, world.generator(), world.generator().getBiomeSource(), world.placements().randomState(), templates, seed, position, world.height(), holder.value().biomes()::contains);
+        return holder.value().findValidGenerationPoint(context);
+    }
+
     static net.minecraft.world.level.levelgen.structure.StructureStart generate(net.minecraft.core.Holder<net.minecraft.world.level.levelgen.structure.Structure> holder, net.minecraft.core.RegistryAccess registries, Locator.StructureWorld world, net.minecraft.world.level.levelgen.structure.templatesystem.StructureTemplateManager templates, long seed, net.minecraft.world.level.ChunkPos position) {
         var dimension = switch (world.dimension()) {
             case "the_nether" -> net.minecraft.world.level.Level.NETHER;

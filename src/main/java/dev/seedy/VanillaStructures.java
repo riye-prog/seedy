@@ -17,6 +17,7 @@ import java.util.Comparator;
 
 final class VanillaStructures implements AutoCloseable {
     record Generated(String name, StructureStart start) { }
+    record StartPoint(String name, net.minecraft.core.BlockPos position) { }
     private final RegistryAccess registries;
     private final Path directory;
     private final LevelStorageSource.LevelStorageAccess storage;
@@ -36,6 +37,18 @@ final class VanillaStructures implements AutoCloseable {
     }
 
     Generated generate(StructureSet set, Locator.StructureWorld world, long seed, ChunkPos position) {
+        return select(set, seed, position, holder -> {
+            var start = WorldgenAdapter.generate(holder, registries, world, templates, seed, position);
+            return start.isValid() ? new Generated(holder.unwrapKey().orElseThrow().identifier().toString(), start) : null;
+        });
+    }
+
+    StartPoint villageStart(StructureSet set, Locator.StructureWorld world, long seed, ChunkPos position) {
+        return select(set, seed, position, holder -> WorldgenAdapter.startPoint(holder, registries, world, templates, seed, position)
+            .map(stub -> new StartPoint(holder.unwrapKey().orElseThrow().identifier().toString(), stub.position())).orElse(null));
+    }
+
+    private <T> T select(StructureSet set, long seed, ChunkPos position, java.util.function.Function<net.minecraft.core.Holder<net.minecraft.world.level.levelgen.structure.Structure>, T> generator) {
         var entries = new ArrayList<>(set.structures());
         var random = new WorldgenRandom(new LegacyRandomSource(0));
         random.setLargeFeatureSeed(seed, position.x(), position.z());
@@ -47,8 +60,8 @@ final class VanillaStructures implements AutoCloseable {
             while (choice >= entries.get(index).weight()) choice -= entries.get(index++).weight();
             var selected = entries.remove(index);
             var holder = selected.structure();
-            var start = WorldgenAdapter.generate(holder, registries, world, templates, seed, position);
-            if (start.isValid()) return new Generated(holder.unwrapKey().orElseThrow().identifier().toString(), start);
+            var generated = generator.apply(holder);
+            if (generated != null) return generated;
             weight -= selected.weight();
         }
         return null;

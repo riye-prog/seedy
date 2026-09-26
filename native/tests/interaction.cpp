@@ -24,7 +24,7 @@ static Json tick() {
 }
 
 static Json click(const char *name) {
-    if (!labels.count(name)) for (auto *window : context->Windows) { auto id = window->GetID(name); if (bounds.count(id)) { labels[name] = id; break; } }
+    for (auto *window : context->Windows) { auto id = window->GetID(name); if (window->Active && !window->Hidden && bounds.count(id)) { labels[name] = id; break; } }
     require(labels.count(name) != 0, name);
     auto point = bounds.at(labels.at(name)).GetCenter();
     ImGui::GetIO().AddMousePosEvent(point.x, point.y);
@@ -35,6 +35,23 @@ static Json click(const char *name) {
     return tick();
 }
 
+static void exportFrame(const std::string &path) {
+    Json frame = {{"width",1440},{"height",1000},{"lists",Json::array()}};
+    for (auto *list : ImGui::GetDrawData()->CmdLists) {
+        Json vertices = Json::array(), indices = Json::array(), commands = Json::array();
+        for (const auto &vertex : list->VtxBuffer) vertices.push_back({vertex.pos.x,vertex.pos.y,vertex.uv.x,vertex.uv.y,vertex.col});
+        for (const auto index : list->IdxBuffer) indices.push_back(index);
+        for (const auto &command : list->CmdBuffer) commands.push_back({{"clip",{command.ClipRect.x,command.ClipRect.y,command.ClipRect.z,command.ClipRect.w}},{"count",command.ElemCount},{"index",command.IdxOffset},{"vertex",command.VtxOffset}});
+        frame["lists"].push_back({{"vertices",vertices},{"indices",indices},{"commands",commands}});
+    }
+    unsigned char *pixels;
+    int width, height;
+    ImGui::GetIO().Fonts->GetTexDataAsRGBA32(&pixels,&width,&height);
+    frame["atlas"] = {width,height};
+    std::ofstream(path + ".rgba",std::ios::binary).write(reinterpret_cast<char *>(pixels), width * height * 4);
+    std::ofstream(path) << frame.dump();
+}
+
 int main(int argc, char **argv) {
     try {
         context = ImGui::CreateContext();
@@ -43,6 +60,7 @@ int main(int argc, char **argv) {
         io.IniFilename = nullptr;
         io.DisplaySize = {1440, 1000};
         io.DeltaTime = 1.0f / 60;
+        io.BackendFlags |= ImGuiBackendFlags_RendererHasVtxOffset;
         configureAppearance(1);
         io.Fonts->Build();
         state = {{"connected",true},{"seed","123"},{"structures",{"minecraft:ancient_cities"}},{"recoveryTypes",{"minecraft:desert_pyramids"}},{"observations",Json::array()}};
@@ -51,7 +69,7 @@ int main(int argc, char **argv) {
         require(click("Rescan").value("action", "") == "rescan", "Rescan button did not activate");
         click("Locate##nav");
         require(activeSection == 1, "Locate tab did not activate");
-        ImGui::SetWindowSize(ImGui::FindWindowByName("Seedy"), {640,900});
+        ImGui::SetWindowSize(ImGui::FindWindowByName("Seedy"), {920,900});
         ImGui::SetWindowPos(ImGui::FindWindowByName("Seedy"), {20,20});
         tick(); tick();
         require(click("Locate").value("action", "") == "locate", "Locate action did not activate");
@@ -92,7 +110,7 @@ int main(int argc, char **argv) {
         require(outlines.value("action", "") == "outlines" && !outlines.value("spawners", true), "Spawner toggle did not activate");
         outlines = click("Matching loot chest outlines");
         require(outlines.value("action", "") == "outlines" && !outlines.value("loot", true), "Loot toggle did not activate");
-        ImGui::SetWindowSize(window, {640, 900});
+        ImGui::SetWindowSize(window, {920, 900});
         ImGui::SetWindowPos(window, {20,20});
         state["lootItems"] = Json::array({"minecraft:enchanted_golden_apple", "minecraft:diamond"});
         tick(); tick();
@@ -137,6 +155,95 @@ int main(int argc, char **argv) {
         click("Biomes"); tick();
         auto netherSearch = click("Locate");
         require(netherSearch.value("dimension", "") == "the_nether" && netherSearch.value("target", "") == "minecraft:warped_forest" && netherSearch.value("cityFilter", "") == "any", "Nether biome search retained End filters");
+        click("Map##nav");
+        require(activeSection == 5, "Map tab did not activate");
+        Json mapRequest;
+        for (int i = 0; i < 30; i++) { auto action = tick(); if (action.value("action", "") == "map") mapRequest = action; }
+        require(!mapRequest.empty() && mapRequest.value("dimension", "") == "overworld", "Map did not request visible tiles");
+        state["map"] = mapRequest;
+        state["map"]["seed"] = "123";
+        state["map"]["revision"] = 1;
+        state["map"]["remaining"] = 0;
+        state["map"]["palette"] = Json::array({{{"name","minecraft:plains"},{"color",0xa0b773}}});
+        state["map"]["tiles"] = Json::array({{{"x",0},{"z",0},{"runs",{1024,0}}}});
+        state["map"]["markers"] = Json::array({{{"name","minecraft:ancient_city"},{"x",0},{"y",-37},{"z",0}}});
+        tick(); tick();
+        require(mapView.tiles.size() == 1 && mapView.colors.size() == 1, "Map tile was not decoded");
+        auto canvas = bounds.at(labels.at("Seed map canvas"));
+        auto canvasCenter = canvas.GetCenter();
+        io.AddMousePosEvent(canvasCenter.x + 30, canvasCenter.y + 20); tick();
+        double beforeZoom = mapView.blocksPerPixel;
+        float anchorX = io.MousePos.x - canvasCenter.x, anchorZ = io.MousePos.y - canvasCenter.y;
+        double anchoredX = mapView.x + anchorX * beforeZoom, anchoredZ = mapView.z + anchorZ * beforeZoom;
+        io.AddMouseWheelEvent(0,1); tick();
+        require(mapView.blocksPerPixel < beforeZoom, "Mouse wheel did not zoom the map");
+        require(std::abs(mapView.x + anchorX * mapView.blocksPerPixel - anchoredX) < 0.001 && std::abs(mapView.z + anchorZ * mapView.blocksPerPixel - anchoredZ) < 0.001, "Map zoom did not preserve the cursor position");
+        double beforeX = mapView.x, beforeZ = mapView.z;
+        auto windowPosition = window->Pos;
+        io.AddMousePosEvent(canvasCenter.x,canvasCenter.y); tick();
+        io.AddMouseButtonEvent(0,true); tick();
+        io.AddMousePosEvent(canvasCenter.x + 40,canvasCenter.y + 25); tick();
+        io.AddMouseButtonEvent(0,false); tick();
+        require(std::abs(mapView.x - (beforeX - 40 * mapView.blocksPerPixel)) < 0.001 && std::abs(mapView.z - (beforeZ - 25 * mapView.blocksPerPixel)) < 0.001, "Map did not follow the drag");
+        require(window->Pos.x == windowPosition.x && window->Pos.y == windowPosition.y, "Dragging the map moved the panel");
+        double beforeButton = mapView.blocksPerPixel;
+        click("+##map-zoom");
+        require(mapView.blocksPerPixel < beforeButton, "Map zoom button did not activate");
+        mapView.selected = {{"name","minecraft:ancient_city"},{"x",12},{"y",-37},{"z",32}};
+        tick(); tick();
+        require(click("Copy##map-selection").value("text", "") == "12 -37 32", "Map selection coordinates were not copied");
+        click("##map-dimension"); tick(); click("End");
+        require(mapView.dimension == 2 && mapView.tiles.empty(), "Changing map dimension retained stale tiles");
+        click("##map-ships"); tick(); click("With elytra ship");
+        require(mapView.cityFilter == 1, "Map ship filter did not activate");
+        for (int i = 0; i < 30; i++) { auto action = tick(); if (action.value("action", "") == "map") mapRequest = action; }
+        require(mapRequest.value("dimension", "") == "the_end" && mapRequest.value("cityFilter", "") == "with_elytra", "Map request lost dimension or ship filter");
+        auto leaveMap = click("Saved##nav");
+        require(leaveMap.value("action", "") == "mapStop" && leaveMap.value("stopMap",false), "Leaving the map did not stop its worker");
+        auto floatingSize = window->Size;
+        auto floatingPosition = window->Pos;
+        click("Expand##window"); tick();
+        require(preferences.maximized && window->Size.x == 1428 && window->Size.y == 988, "Window did not maximize inside Minecraft");
+        click("Restore##window"); tick();
+        require(!preferences.maximized && window->Size.x == floatingSize.x && window->Size.y == floatingSize.y && window->Pos.x == floatingPosition.x && window->Pos.y == floatingPosition.y, "Restore lost the floating window geometry");
+        require(io.ConfigWindowsResizeFromEdges, "Window edges are not resizable");
+        auto beforeResize = window->Size;
+        ImVec2 rightEdge{window->Pos.x + window->Size.x - 1,window->Pos.y + window->Size.y / 2};
+        io.AddMousePosEvent(rightEdge.x,rightEdge.y);tick();io.AddMouseButtonEvent(0,true);tick();
+        io.AddMousePosEvent(rightEdge.x + 48,rightEdge.y);tick();io.AddMouseButtonEvent(0,false);tick();
+        require(window->Size.x > beforeResize.x + 40 && window->Size.y == beforeResize.y, "Dragging the window edge did not resize it");
+        click("Settings##nav"); tick();
+        require(activeSection == 6, "Settings tab did not open");
+        click("Map controls");
+        require(!preferences.controls, "Map sidebar setting did not toggle");
+        click("Map controls");
+        click("Map##nav"); tick(); tick();
+        click("##map-zoom-presets"); tick(); click("Close-up");
+        require(mapView.blocksPerPixel == 0.125, "Close-up preset did not reach the new zoom limit");
+        mapZoom(0.1,{0,0},{0,0}); require(mapView.blocksPerPixel == 0.125,"Zoom exceeded close-up limit");
+        click("##map-zoom-presets"); tick(); click("Overview");
+        require(mapView.blocksPerPixel == 256, "Overview preset did not activate");
+        click("Hide controls");
+        require(!preferences.controls, "Map controls did not collapse");
+        tick();
+        click("Show controls");
+        require(preferences.controls, "Map controls did not expand");
+        float beforeSidebar = preferences.sidebarWidth;
+        auto splitter = bounds.at(labels.at("Resize map controls")).GetCenter();
+        io.AddMousePosEvent(splitter.x,splitter.y);tick();io.AddMouseButtonEvent(0,true);tick();
+        io.AddMousePosEvent(splitter.x + 40,splitter.y);tick();io.AddMouseButtonEvent(0,false);tick();
+        require(preferences.sidebarWidth == beforeSidebar + 40, "Map sidebar splitter did not resize");
+        click("Display"); tick();
+        click("Detail##map"); tick(); click("Detailed");
+        require(preferences.detail == 2, "Map detail setting did not change");
+        click("Grid##map"); tick(); click("Chunk grid");
+        require(preferences.grid == 2, "Chunk grid setting did not change");
+        auto preferencesAction = click("X##close");
+        require(preferencesAction.contains("preferences") && preferencesAction["preferences"]["detail"] == 2 && preferencesAction["preferences"]["sidebarWidth"] == beforeSidebar + 40, "Closing did not save updated map settings");
+        preferences.markerSize = 7;
+        Json closedPreferences;
+        persistPreferences(closedPreferences,true);
+        require(closedPreferences.value("action", "") == "preferences" && closedPreferences["preferences"]["markerSize"] == 7, "Closing with a key did not flush pending settings");
         ImGui::NewFrame();
         drawOutlines({10,10,11,11,0,20,20,21,21,1,30,30,31,31,2});
         auto outlineDraw = ImGui::GetBackgroundDrawList();
@@ -146,10 +253,31 @@ int main(int argc, char **argv) {
             require(rgb == (IM_COL32(120,189,255,255) & 0xffffff) || rgb == (IM_COL32(255,206,102,255) & 0xffffff) || rgb == (IM_COL32(205,168,255,255) & 0xffffff), "Outline contains a dark backing stroke");
         }
         ImGui::Render();
+        if (argc == 3) {
+            Json preview; std::ifstream(argv[1]) >> preview;
+            mapView = MapView{};
+            mapView.initialized = true; mapView.seed = preview.value("seed", ""); mapView.requestId = preview.value("id",0LL);
+            state["seed"] = mapView.seed; state["map"] = preview;
+            state["dimension"] = "overworld"; state["x"] = 128; state["z"] = 96;
+            state["catalogs"]["overworld"]["structures"] = Json::array({"minecraft:villages"});
+            activeSection = 5;
+            preferences = UiPreferences{};
+            preferences.detail = 2;
+            state["gameVersion"] = "26.2";
+            ImGui::SetWindowSize(window,{1160,860}); ImGui::SetWindowPos(window,{30,30});
+            io.AddMousePosEvent(1200,900);
+            tick(); tick();
+            mapView.sentKey = mapView.desiredKey;
+            auto startTime = std::chrono::steady_clock::now();
+            for (int i = 0; i < 120; i++) tick();
+            std::cout << "Map CPU frame ms: " << std::chrono::duration<double,std::milli>(std::chrono::steady_clock::now() - startTime).count() / 120 << " vertices: " << ImGui::GetDrawData()->TotalVtxCount << '\n';
+            exportFrame(argv[2]);
+        }
         ImGui::DestroyContext(context);
         std::cout << "Passed: collection, rescan, navigation, locate, saving locations, seed entry, copy, dragging, close, loot filters, chest details, outline colors\n";
         return 0;
     } catch (const std::exception &error) {
+        if (ImGui::GetCurrentContext()) exportFrame("/tmp/seedy-window-failure.json");
         std::cerr << error.what() << '\n';
         return 1;
     }

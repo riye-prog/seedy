@@ -26,6 +26,10 @@ public final class Locator implements AutoCloseable {
     private VanillaStructures vanillaStructures;
     private ChestPredictor chestPredictor;
     private final java.util.Map<String, Catalog> dimensionCatalogs = new java.util.HashMap<>();
+    private record MapStartKey(long seed, String dimension, String target, String cityFilter, int x, int z) { }
+    private final java.util.Map<MapStartKey, java.util.Optional<Result>> mapStarts = new java.util.LinkedHashMap<>(512,0.75f,true) {
+        @Override protected boolean removeEldestEntry(java.util.Map.Entry<MapStartKey, java.util.Optional<Result>> entry) { return size() > 512; }
+    };
 
     public Catalog catalog() {
         var structures = registries.lookupOrThrow(Registries.STRUCTURE_SET).listElements()
@@ -77,6 +81,22 @@ public final class Locator implements AutoCloseable {
     }
 
     public List<Result> search(long seed, String kind, String target, int x, int y, int z, int radius, LootQuery query, String dimension, String cityFilter) {
+        return search(seed, kind, target, x, y, z, radius, query, dimension, cityFilter, 128);
+    }
+
+    BiomeSampler mapBiomes(long seed, String dimension) {
+        validateDimension(dimension);
+        if (structureSeed == null || structureSeed != seed) { structureWorlds.clear(); structureSeed = seed; }
+        return structureWorlds.computeIfAbsent(dimension, key -> WorldgenAdapter.structureWorld(registries, seed, key)).biomes();
+    }
+
+    List<Result> mapStructures(long seed, String target, int tileX, int tileZ, String dimension, String cityFilter) {
+        int x = tileX * 1024, z = tileZ * 1024;
+        return search(seed, "structure", target, x + 512, 64, z + 512, 1536, LootQuery.NONE, dimension, cityFilter, Integer.MAX_VALUE).stream()
+            .filter(result -> result.x() >= x && result.x() < x + 1024 && result.z() >= z && result.z() < z + 1024).toList();
+    }
+
+    private List<Result> search(long seed, String kind, String target, int x, int y, int z, int radius, LootQuery query, String dimension, String cityFilter, int limit) {
         validateDimension(dimension);
         if (!List.of("any", "with_elytra", "without_elytra").contains(cityFilter)) throw new IllegalArgumentException("Choose all cities, with elytra, or without elytra.");
         if (!cityFilter.equals("any") && (!kind.equals("structure") || !target.equals("minecraft:end_cities"))) throw new IllegalArgumentException("The elytra filter only applies to End cities.");
@@ -108,6 +128,16 @@ public final class Locator implements AutoCloseable {
                     int px = pos.x() * 16 + 8, pz = pos.z() * 16 + 8;
                     if (Math.hypot((long)px - x, (long)pz - z) > radius || !placement.isStructureChunk(world.placements(), pos.x(), pos.z())) continue;
                     if (vanillaStructures == null) vanillaStructures = new VanillaStructures((net.minecraft.core.RegistryAccess)registries);
+                    if (limit == Integer.MAX_VALUE) {
+                        var key = new MapStartKey(seed, dimension, target, cityFilter, pos.x(), pos.z());
+                        var marker = mapStarts.computeIfAbsent(key, ignored -> java.util.Optional.ofNullable(mapStart(seed, target, dimension, cityFilter, set.value(), world, pos)));
+                        if (marker.isPresent()) {
+                            var result = marker.get();
+                            double distance = Math.hypot((long)result.x() - x, (long)result.z() - z);
+                            if (distance <= radius) results.add(new Result(result.name(), result.x(), result.y(), result.z(), Math.round(distance), result.confidence(), dimension, null, result.elytra()));
+                        }
+                        continue;
+                    }
                     var generated = vanillaStructures.generate(set.value(), world, seed, pos);
                     if (generated == null || specificNetherStructure && !generated.name().equals(target)) continue;
                     var elytra = elytraPosition(generated.start());
@@ -137,13 +167,29 @@ public final class Locator implements AutoCloseable {
                 }
             }
         } else throw new IllegalArgumentException("Choose structure or biome.");
-        return results.stream().sorted(Comparator.comparingLong(Result::distance)).limit(128).toList();
+        return results.stream().sorted(Comparator.comparingLong(Result::distance)).limit(limit).toList();
     }
 
     static net.minecraft.world.level.biome.BiomeSource source(HolderLookup.Provider registries, String dimension) {
         if (dimension.equals("the_end")) return net.minecraft.world.level.biome.TheEndBiomeSource.create(registries.lookupOrThrow(Registries.BIOME));
         var preset = dimension.equals("the_nether") ? MultiNoiseBiomeSourceParameterLists.NETHER : MultiNoiseBiomeSourceParameterLists.OVERWORLD;
         return MultiNoiseBiomeSource.createFromPreset(registries.lookupOrThrow(Registries.MULTI_NOISE_BIOME_SOURCE_PARAMETER_LIST).getOrThrow(preset));
+    }
+
+    private Result mapStart(long seed, String target, String dimension, String cityFilter, net.minecraft.world.level.levelgen.structure.StructureSet set, StructureWorld world, net.minecraft.world.level.ChunkPos position) {
+        if (target.equals("minecraft:villages")) {
+            var point = vanillaStructures.villageStart(set, world, seed, position);
+            return point == null ? null : new Result(point.name(), point.position().getX(), null, point.position().getZ(), 0, "Vanilla village start with terrain and biome checks", dimension);
+        }
+        var generated = vanillaStructures.generate(set, world, seed, position);
+        if (generated == null || (target.equals("minecraft:fortress") || target.equals("minecraft:bastion_remnant")) && !generated.name().equals(target)) return null;
+        var elytra = elytraPosition(generated.start());
+        if (cityFilter.equals("with_elytra") && elytra == null || cityFilter.equals("without_elytra") && elytra != null) return null;
+        var pieces = generated.start().getPieces();
+        var portalRoom = pieces.stream().filter(piece -> piece instanceof StrongholdPieces.PortalRoom).findFirst();
+        var center = portalRoom.orElse(pieces.getFirst()).getBoundingBox().getCenter();
+        Integer height = List.of("minecraft:ancient_cities", "minecraft:trial_chambers", "minecraft:strongholds", "minecraft:end_cities").contains(target) ? center.getY() : null;
+        return new Result(generated.name(), center.getX(), height, center.getZ(), 0, portalRoom.isPresent() ? "Vanilla stronghold portal room" : "Vanilla structure start and pieces generated for this seed and game version", dimension, null, elytra);
     }
 
     private static void add(List<Result> results, String name, int px, Integer py, int pz, int x, int z, int radius, String confidence, String dimension) {

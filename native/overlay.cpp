@@ -70,6 +70,7 @@ static void configureAppearance(float scale) {
     style.GrabRounding = 4;
     style.ScrollbarSize = 10;
     io.ConfigWindowsMoveFromTitleBarOnly = true;
+    io.ConfigWindowsResizeFromEdges = true;
     style.Colors[ImGuiCol_WindowBg] = {0.105f,0.12f,0.145f,1};
     style.Colors[ImGuiCol_ChildBg] = {0.085f,0.10f,0.12f,1};
     style.Colors[ImGuiCol_PopupBg] = {0.15f,0.17f,0.20f,1};
@@ -397,6 +398,9 @@ static void savedPanel(Json &command) {
     }
 }
 
+#include "ui_settings.h"
+#include "seed_map.h"
+
 static void drawOutlines(const std::vector<double> &lines) {
     auto draw = ImGui::GetBackgroundDrawList();
     for (int i = 0; i + 4 < static_cast<int>(lines.size()); i += 5) {
@@ -406,20 +410,33 @@ static void drawOutlines(const std::vector<double> &lines) {
 }
 
 static Json drawPanel(int width, int height) {
-    ImGui::SetNextWindowSize({std::min(560 * uiScale, width - 24.0f), std::min(490 * uiScale, height - 24.0f)}, ImGuiCond_FirstUseEver);
-    ImGui::SetNextWindowPos({width / 2.0f, height / 2.0f}, ImGuiCond_FirstUseEver, {0.5f,0.5f});
-    ImGui::SetNextWindowSizeConstraints({std::min(440 * uiScale, width - 24.0f),std::min(350 * uiScale,height - 24.0f)}, {static_cast<float>(width - 12),static_cast<float>(height - 12)});
+    loadPreferences();
+    ImGui::SetNextWindowSize({std::min(preferences.width * uiScale, width - 24.0f), std::min(preferences.height * uiScale, height - 24.0f)}, ImGuiCond_FirstUseEver);
+    if (preferences.x < 0 || preferences.y < 0) ImGui::SetNextWindowPos({width / 2.0f,height / 2.0f}, ImGuiCond_FirstUseEver,{0.5f,0.5f});
+    else ImGui::SetNextWindowPos({preferences.x * uiScale,preferences.y * uiScale},ImGuiCond_FirstUseEver);
+    if (preferences.maximized) { ImGui::SetNextWindowPos({6,6}); ImGui::SetNextWindowSize({width - 12.0f,height - 12.0f}); }
+    else if (restoreWindow) {
+        ImGui::SetNextWindowSize({preferences.width * uiScale,preferences.height * uiScale});
+        ImGui::SetNextWindowPos({std::max(0.0f,preferences.x) * uiScale,std::max(0.0f,preferences.y) * uiScale});
+        restoreWindow = false;
+    }
+    if (requestedWindowSize.x > 0) { ImGui::SetNextWindowSize({requestedWindowSize.x * uiScale,requestedWindowSize.y * uiScale}); requestedWindowSize = {-1,-1}; }
+    ImGui::SetNextWindowSizeConstraints({std::min(520 * uiScale, width - 24.0f),std::min(420 * uiScale,height - 24.0f)}, {static_cast<float>(width - 12),static_cast<float>(height - 12)});
+    ImGui::SetNextWindowBgAlpha(preferences.opacity);
     Json command = Json::object();
     bool resetContentScroll = false;
-    if (ImGui::Begin("Seedy", nullptr, ImGuiWindowFlags_NoTitleBar | ImGuiWindowFlags_NoCollapse | ImGuiWindowFlags_NoSavedSettings)) {
+    bool stopMap = false;
+    if (ImGui::Begin("Seedy", nullptr, ImGuiWindowFlags_NoTitleBar | ImGuiWindowFlags_NoCollapse | ImGuiWindowFlags_NoSavedSettings | (preferences.maximized ? ImGuiWindowFlags_NoResize : ImGuiWindowFlags_None))) {
         auto position = ImGui::GetWindowPos();
         auto size = ImGui::GetWindowSize();
         ImVec2 visiblePosition = {std::clamp(position.x, 0.0f, std::max(0.0f, width - size.x)),std::clamp(position.y, 0.0f, std::max(0.0f, height - size.y))};
         if (position.x != visiblePosition.x || position.y != visiblePosition.y) ImGui::SetWindowPos(visiblePosition);
+        if (!preferences.maximized) { preferences.width = size.x / uiScale; preferences.height = size.y / uiScale; preferences.x = visiblePosition.x / uiScale; preferences.y = visiblePosition.y / uiScale; }
         ImVec2 header = ImGui::GetCursorScreenPos();
-        float headerWidth = ImGui::GetContentRegionAvail().x - 42 * uiScale;
+        float headerWidth = ImGui::GetContentRegionAvail().x - 136 * uiScale;
         ImGui::InvisibleButton("Move panel", {headerWidth,32 * uiScale});
-        if (ImGui::IsItemActive() && ImGui::IsMouseDragging(ImGuiMouseButton_Left, 0)) {
+        if (ImGui::IsItemHovered() && ImGui::IsMouseDoubleClicked(ImGuiMouseButton_Left)) toggleMaximized();
+        if (!preferences.maximized && ImGui::IsItemActive() && ImGui::IsMouseDragging(ImGuiMouseButton_Left, 0)) {
             auto position = ImGui::GetWindowPos();
             auto size = ImGui::GetWindowSize();
             auto delta = ImGui::GetIO().MouseDelta;
@@ -431,20 +448,29 @@ static Json drawPanel(int width, int height) {
         std::string subtitle = state.value("connected", false) ? label(state.value("dimension", "overworld")) + "  /  " + state.value("gameVersion", "") : "No world connected";
         draw->AddText({header.x + 76 * uiScale,header.y + 7 * uiScale}, IM_COL32(164,177,194,255), subtitle.c_str());
         ImGui::SameLine();
+        if (ImGui::Button(preferences.maximized ? "Restore##window" : "Expand##window", {84 * uiScale,30 * uiScale})) toggleMaximized();
+        ImGui::SameLine();
         if (ImGui::Button("X##close", {32 * uiScale,30 * uiScale})) command = {{"action","close"}};
-        const char *sections[] = {"Recovery##nav", "Locate##nav", "Seed##nav", "Saved##nav", "World##nav"};
-        for (int i = 0; i < 5; i++) {
-            if (i) ImGui::SameLine();
+        const char *sections[] = {"Recovery##nav", "Locate##nav", "Seed##nav", "Saved##nav", "World##nav", "Map##nav", "Settings##nav"};
+        int columns = ImGui::GetContentRegionAvail().x < 620 * uiScale ? 4 : 7;
+        float navWidth = (ImGui::GetContentRegionAvail().x - (columns - 1) * ImGui::GetStyle().ItemSpacing.x) / columns;
+        for (int i = 0; i < 7; i++) {
+            if (i % columns) ImGui::SameLine();
             ImGui::PushStyleColor(ImGuiCol_Button, i == activeSection ? ImVec4{0.29f,0.37f,0.48f,1} : ImVec4{0.15f,0.17f,0.20f,1});
-            if (ImGui::Button(sections[i], {(ImGui::GetWindowWidth() - 36 * uiScale - 36 * uiScale) / 5,31 * uiScale})) { activeSection = i; resetContentScroll = true; }
+            if (ImGui::Button(sections[i], {navWidth,31 * uiScale})) {
+                if (activeSection == 5 && i != 5) { stopMap = true; command = {{"action","mapStop"}}; mapView.sentKey.clear(); }
+                activeSection = i; resetContentScroll = true;
+            }
             ImGui::PopStyleColor();
         }
         ImGui::Dummy({0,3 * uiScale});
         ImGui::PushStyleColor(ImGuiCol_ChildBg, {0,0,0,0});
-        ImGui::BeginChild("panel-content", {0,-28 * uiScale}, ImGuiChildFlags_None);
+        ImGui::BeginChild("panel-content", {0,-28 * uiScale}, ImGuiChildFlags_None, activeSection == 5 ? ImGuiWindowFlags_NoScrollWithMouse : ImGuiWindowFlags_None);
         if (resetContentScroll) ImGui::SetScrollY(0);
         if (activeSection == 0) recoveryPanel(command);
         if (activeSection == 1) locatePanel(command);
+        if (activeSection == 5) mapPanel(command);
+        if (activeSection == 6) settingsPanel();
         if (activeSection == 2) {
             std::string seed = state.value("seed", "");
             ImGui::TextUnformatted(seed.empty() ? "No seed set" : seed.c_str());
@@ -492,6 +518,8 @@ static Json drawPanel(int width, int height) {
         if (!state.value("seed", "").empty()) { ImGui::SameLine(); ImGui::TextDisabled("%s", state.value("verified", false) ? "Seed verified" : "Manual seed"); }
     }
     ImGui::End();
+    if (stopMap) command["stopMap"] = true;
+    persistPreferences(command);
     return command;
 }
 
@@ -519,7 +547,7 @@ extern "C" JNIEXPORT jstring JNICALL Java_dev_seedy_NativeGui_frame(JNIEnv *env,
             if (kind == 2) io.AddMouseWheelEvent(static_cast<float>(input[i+1]),static_cast<float>(input[i+2]));
             if (kind == 3 && input[i+1] > 0 && input[i+1] < 21) io.AddKeyEvent(keys[static_cast<int>(input[i+1])], input[i+2] != 0);
             if (kind == 4) io.AddInputCharacter(static_cast<unsigned int>(input[i+1]));
-            if (kind == 5) io.AddFocusEvent(input[i+1] != 0);
+            if (kind == 5) { io.AddFocusEvent(input[i+1] != 0); mapView.sentKey.clear(); }
         }
         jlong handles[9];
         if (env->GetArrayLength(graphics) != 9) throw std::runtime_error("Invalid Vulkan context");
@@ -532,6 +560,7 @@ extern "C" JNIEXPORT jstring JNICALL Java_dev_seedy_NativeGui_frame(JNIEnv *env,
         env->GetDoubleArrayRegion(outlineLines, 0, lineCount, lines.data());
         drawOutlines(lines);
         Json command = panel ? drawPanel(width, height) : Json::object();
+        if (!panel && preferencesLoaded) persistPreferences(command,true);
         ImGui::Render();
         VulkanRenderer::render(ImGui::GetDrawData(), handles, width, height);
         return env->NewStringUTF(command.empty() ? "" : command.dump().c_str());

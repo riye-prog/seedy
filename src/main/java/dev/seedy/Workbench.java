@@ -24,12 +24,16 @@ public final class Workbench implements AutoCloseable {
     private final LinkedHashMap<String, Observation> observations = new LinkedHashMap<>();
     private final LinkedHashMap<String, SessionStore.SavedLocation> savedLocations = new LinkedHashMap<>();
     private SessionStore store;
+    private UiSettings uiStore;
+    private JsonObject uiSettings = UiSettings.normalize(new JsonObject());
     private String gameVersion;
     private String storageStatus = "Join a world to save progress";
     private boolean dirty;
     private boolean storageWritable = true;
     private final ExecutorService searches = Executors.newSingleThreadExecutor(Thread.ofPlatform().daemon().factory());
     private final AtomicLong searchGeneration = new AtomicLong();
+    private final SeedMap seedMap = new SeedMap();
+    private boolean mapVisible;
     private Future<?> search;
     private Locator locator;
     private Map<String, PlacementRule> rules = Map.of();
@@ -58,6 +62,9 @@ public final class Workbench implements AutoCloseable {
     public void initialize() {
         gameVersion = net.minecraft.SharedConstants.getCurrentVersion().name();
         store = new SessionStore(net.fabricmc.loader.api.FabricLoader.getInstance().getConfigDir().resolve("seedy/sessions"), gameVersion);
+        uiStore = new UiSettings(net.fabricmc.loader.api.FabricLoader.getInstance().getConfigDir().resolve("seedy/ui.json"));
+        try { uiSettings = uiStore.load(); }
+        catch (java.io.IOException error) { org.slf4j.LoggerFactory.getLogger("Seedy").warn("Using default window settings", error); }
         locator = new Locator();
         catalog = locator.catalog();
         dimensionCatalogs = java.util.stream.Stream.of("overworld", "the_nether", "the_end").collect(java.util.stream.Collectors.toUnmodifiableMap(dimension -> dimension, locator::catalog));
@@ -76,10 +83,12 @@ public final class Workbench implements AutoCloseable {
     public boolean collecting() { return collecting; }
     public String snapshot() { return snapshot; }
     public void refresh() { publish(Minecraft.getInstance()); }
+    public void stopMap() { mapVisible = false; seedMap.stop(); }
 
     public void session(Long seedHash) {
         saveSession();
         session++;
+        seedMap.reset();
         connected = seedHash != null;
         hash = seedHash;
         seed = null;
@@ -142,6 +151,7 @@ public final class Workbench implements AutoCloseable {
         recovery.start(List.copyOf(observations.values()), hash, value -> Minecraft.getInstance().execute(() -> {
             if (session != world) return;
             seed = Long.toString(value);
+            seedMap.reset();
             verified = true;
             dirty = true;
             cancelSearch();
@@ -152,8 +162,10 @@ public final class Workbench implements AutoCloseable {
         try {
             var body = JSON.fromJson(message, JsonObject.class);
             String action = body.get("action").getAsString();
+            if (body.has("stopMap") && body.get("stopMap").getAsBoolean()) stopMap();
             error = "";
             switch (action) {
+                case "preferences" -> { }
                 case "close" -> Minecraft.getInstance().gui.setScreen(null);
                 case "collect" -> { collecting = !collecting; if (collecting) SeedyClient.rescan(); }
                 case "outlines" -> { LoadedObjects.treasureEnabled = body.get("treasure").getAsBoolean(); LoadedObjects.spawnersEnabled = body.get("spawners").getAsBoolean(); if (body.has("loot")) LoadedObjects.lootEnabled = body.get("loot").getAsBoolean(); }
@@ -164,9 +176,16 @@ public final class Workbench implements AutoCloseable {
                     try { seed = Long.toString(Long.parseLong(body.get("seed").getAsString().trim())); }
                     catch (NumberFormatException e) { throw new IllegalArgumentException("Enter a whole number from -9223372036854775808 to 9223372036854775807."); }
                     verified = false;
+                    seedMap.reset();
                     cancelSearch();
                 }
-                case "clearSeed" -> { seed = null; verified = false; cancelSearch(); }
+                case "clearSeed" -> { seed = null; verified = false; seedMap.reset(); cancelSearch(); }
+                case "map" -> {
+                    if (seed == null) throw new IllegalArgumentException("Recover or enter a seed first.");
+                    seedMap.request(new SeedMap.Request(body.get("id").getAsLong(), Long.parseLong(seed), body.get("dimension").getAsString(), body.get("y").getAsInt(), body.get("step").getAsInt(), body.get("minX").getAsInt(), body.get("minZ").getAsInt(), body.get("maxX").getAsInt(), body.get("maxZ").getAsInt(), body.get("target").getAsString(), body.get("cityFilter").getAsString()));
+                    mapVisible = true;
+                }
+                case "mapStop" -> stopMap();
                 case "observe" -> observe(body.get("structure").getAsString(), body.get("x").getAsInt(), body.get("z").getAsInt(), "Manual");
                 case "remove" -> { observations.remove(body.get("id").getAsString()); revision++; recovery.cancel(); }
                 case "locate" -> locate(body);
@@ -183,6 +202,7 @@ public final class Workbench implements AutoCloseable {
                 default -> throw new IllegalArgumentException("Unknown action");
             }
             if (java.util.Set.of("seed", "clearSeed", "collect", "rescan", "observe", "remove", "pin", "unpin").contains(action)) dirty = true;
+            if (body.has("preferences") && uiStore != null) uiSettings = uiStore.save(body.getAsJsonObject("preferences"));
         } catch (Exception e) { error = e.getMessage() == null ? "Invalid input" : e.getMessage(); }
         publish(Minecraft.getInstance());
     }
@@ -270,6 +290,7 @@ public final class Workbench implements AutoCloseable {
     private void publish(Minecraft client) {
         var state = new JsonObject();
         state.addProperty("seed", seed == null ? "" : seed);
+        state.add("uiSettings", uiSettings);
         state.addProperty("verified", verified);
         state.addProperty("connected", connected);
         state.addProperty("collecting", collecting);
@@ -283,6 +304,7 @@ public final class Workbench implements AutoCloseable {
         state.addProperty("searchDimension", searchDimension);
         state.addProperty("searchCityFilter", searchCityFilter);
         state.add("catalogs", JSON.toJsonTree(dimensionCatalogs));
+        if (mapVisible) state.add("map", seedMap.snapshot());
         state.addProperty("error", error);
         state.addProperty("storageStatus", dirty && storageWritable ? "Unsaved changes" : storageStatus);
         state.addProperty("pendingChunks", SeedyClient.pendingChunks());
@@ -308,5 +330,5 @@ public final class Workbench implements AutoCloseable {
         snapshot = JSON.toJson(state);
     }
 
-    @Override public void close() { saveSession(); recovery.close(); cancelSearch(); if (locator != null) searches.submit(locator::close); searches.shutdown(); }
+    @Override public void close() { saveSession(); recovery.close(); seedMap.close(); cancelSearch(); if (locator != null) searches.submit(locator::close); searches.shutdown(); }
 }

@@ -1,21 +1,25 @@
 {
-  "version": "0.6.0",
-  "native_interaction": "passed: existing controls, dimension selection, matching target catalogs, both End-city ship filters, copying elytra coordinates, clearing stale results, Nether biome searches",
+  "version": "0.8.0",
+  "native_interaction": "passed: existing controls, edge resizing, maximize/restore geometry, collapsible and resizable map sidebar, zoom presets and limits, detail/grid controls, and settings flushed when closing",
   "windows_runtime": "not tested",
   "versions": {
     "26.2": {
-      "tests": 30,
-      "sha256": "d46299de206eb09265b1d1ced2a390f122e4c3a589e459e53ea8cd7153529abf",
-      "bytes": 2945130,
+      "tests": 38,
+      "sha256": "1fe6dfcbec4c8aa6eb338ab799487d538e6b3ec336e7db55faa74c17fb7f5d20",
+      "bytes": 3062372,
       "native_binaries_verified": true,
-      "fabric_dimension_smoke_passed": true
+      "fabric_dimension_smoke_passed": true,
+      "fabric_map_smoke_passed": true,
+      "fabric_map_ui_smoke_passed": true
     },
     "26.3": {
-      "tests": 30,
-      "sha256": "e89b77accdc7bc2d7f3d443b2f25000c0bb65b5aa43353d6d989aceef86371fe",
-      "bytes": 2945576,
+      "tests": 38,
+      "sha256": "98062736817ce3459cea797243e43c9153795dbfefc311e3a69081ea30010446",
+      "bytes": 3062836,
       "native_binaries_verified": true,
-      "fabric_dimension_smoke_passed": true
+      "fabric_dimension_smoke_passed": true,
+      "fabric_map_smoke_passed": true,
+      "fabric_map_ui_smoke_passed": true
     }
   },
   "ancient_city_regression": {
@@ -50,7 +54,7 @@
     ],
     "method": "vanilla placement and structure-start generation; no live-world assertion"
   },
-  "macos_runtime": "26.2 and 26.3 real Fabric clients passed dimension and End-city filter checks, plus the existing 384-case loot regression",
+  "macos_runtime": "26.2 and 26.3 real Fabric clients rendered the native window with Vulkan, requested and received map tiles through the native GUI bridge, saved window settings, and passed dimension and loot regressions",
   "native_builds": [
     "macos arm64 and x86_64 universal dylib",
     "windows x86_64 dll"
@@ -105,6 +109,79 @@
       "End-city ship filters compared with generated ship templates",
       "elytra marker coordinates lie within generated ships",
       "new End-city synchronization mixin verified in real Fabric clients"
+    ]
+  },
+  "seed_map": {
+    "seed": "2589511696370800371",
+    "viewport_bounds": [
+      -2048,
+      -2048,
+      2047,
+      2047
+    ],
+    "structures": "minecraft:villages",
+    "cache_limits": {
+      "biome_tiles": 512,
+      "structure_tiles": 64,
+      "structure_starts": 512
+    },
+    "visible_limits": {
+      "biome_tiles": 256,
+      "structure_tiles": 25
+    },
+    "versions": {
+      "26.2": {
+        "cold_ms": 1079,
+        "cached_ms": 15,
+        "payload_bytes": 28639,
+        "markers": 19,
+        "detailed_ms": 2139,
+        "detailed_payload_bytes": 151541
+      },
+      "26.3": {
+        "cold_ms": 118,
+        "cached_ms": 11,
+        "payload_bytes": 28769,
+        "markers": 19,
+        "detailed_ms": 992,
+        "detailed_payload_bytes": 152152
+      }
+    },
+    "limitations": [
+      "Biome slice at selected Y; not a terrain elevation map",
+      "Coarse sampling at distant zoom; structure dots require closer zoom",
+      "Vanilla generation for the current game version; custom generation and older chunks can differ"
+    ],
+    "native_frame_cpu_ms": 0.255843,
+    "native_frame_vertices": 64572,
+    "benchmark_note": "headless UI construction and draw-list generation on this Mac; not an in-game FPS or GPU benchmark"
+  },
+  "window_gui": {
+    "default_size": [
+      1040,
+      760
+    ],
+    "preferences": "config/seedy/ui.json",
+    "zoom_blocks_per_pixel": [
+      0.125,
+      1024
+    ],
+    "zoom_presets": 6,
+    "detail_tile_budgets": {
+      "fast": 64,
+      "balanced": 128,
+      "detailed": 256
+    },
+    "checks": [
+      "preference round-trip and validation",
+      "damaged settings preserved on read",
+      "actual mouse edge resizing",
+      "maximize and restore geometry",
+      "sidebar toggle and mouse resizing",
+      "zoom presets and limits",
+      "detail and chunk grid controls",
+      "settings flushed on panel close",
+      "live native map request/response and saved preferences on both Minecraft versions"
     ]
   }
 }
