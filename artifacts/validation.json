@@ -1,187 +1,90 @@
 {
-  "version": "0.8.0",
-  "native_interaction": "passed: existing controls, edge resizing, maximize/restore geometry, collapsible and resizable map sidebar, zoom presets and limits, detail/grid controls, and settings flushed when closing",
-  "windows_runtime": "not tested",
-  "versions": {
+  "version": "0.9.10",
+  "source_commit": "2d473375a459590ed93f504ff21e74c9adb7bd13",
+  "hardware": {
+    "cpu": "Apple M3",
+    "logical_cpus": 8,
+    "scan_workers": 7
+  },
+  "java_tests": {
     "26.2": {
-      "tests": 38,
-      "sha256": "1fe6dfcbec4c8aa6eb338ab799487d538e6b3ec336e7db55faa74c17fb7f5d20",
-      "bytes": 3062372,
-      "native_binaries_verified": true,
-      "fabric_dimension_smoke_passed": true,
-      "fabric_map_smoke_passed": true,
-      "fabric_map_ui_smoke_passed": true
+      "tests": 42,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0
     },
     "26.3": {
-      "tests": 38,
-      "sha256": "98062736817ce3459cea797243e43c9153795dbfefc311e3a69081ea30010446",
-      "bytes": 3062836,
-      "native_binaries_verified": true,
-      "fabric_dimension_smoke_passed": true,
-      "fabric_map_smoke_passed": true,
-      "fabric_map_ui_smoke_passed": true
+      "tests": 42,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0
     }
   },
-  "ancient_city_regression": {
-    "seed": "2589511696370800371",
-    "version": "26.2",
-    "rejected_old_xz": [
-      [
-        -632,
-        -584
-      ],
-      [
-        -312,
-        56
-      ]
+  "native_kernel_equivalence": {
+    "known_states": 256,
+    "search_windows": 16384,
+    "candidate_emission_compared": true,
+    "local_passed": [
+      "macos-arm64",
+      "macos-x86_64 under Rosetta"
     ],
-    "generated_piece_positions": [
-      [
-        -596,
-        -37,
-        -240
-      ],
-      [
-        -720,
-        -37,
-        188
-      ],
-      [
-        -251,
-        -37,
-        -160
-      ]
-    ],
-    "method": "vanilla placement and structure-start generation; no live-world assertion"
+    "ci_status": "passed",
+    "ci_platforms": [
+      "macos-arm64",
+      "macos-x86_64",
+      "windows-x86_64"
+    ]
   },
-  "macos_runtime": "26.2 and 26.3 real Fabric clients rendered the native window with Vulkan, requested and received map tiles through the native GUI bridge, saved window settings, and passed dimension and loot regressions",
-  "native_builds": [
-    "macos arm64 and x86_64 universal dylib",
-    "windows x86_64 dll"
+  "native_panel_interaction": "passed locally",
+  "overworld_fixtures": [
+    {
+      "minecraft": "26.2",
+      "chunks": 924,
+      "raw_blocks": 49,
+      "seed": "2589511696370800371",
+      "exact_seed_recovered": true,
+      "seconds": 166.244,
+      "previous_recorded_seconds": 353.298
+    },
+    {
+      "minecraft": "26.2",
+      "chunks": 1089,
+      "raw_blocks": 144,
+      "expected_rng_state_recovered": true
+    },
+    {
+      "minecraft": "26.3",
+      "chunks": 1089,
+      "raw_blocks": 328,
+      "exact_seed_recovered": true,
+      "seconds": 61.4004
+    }
   ],
-  "loot_validation": {
-    "seed": "2589511696370800371",
-    "checks": [
-      "ancient-city chest seeds compared with vanilla placement",
-      "desert-temple chest seeds compared with vanilla placement across rotations and chunk borders",
-      "128 loot-seed cases compared with vanilla desert-pyramid and ice-box loot tables per version",
-      "structure-total filter boundaries and locator integration"
-    ],
-    "limitations": [
-      "normal player luck and fresh vanilla generation",
-      "terrain-dependent sculk-affected chests are marked unavailable and excluded from totals",
-      "custom loot tables, changed or looted chests, and chunks generated in older versions can differ"
-    ]
+  "fixture_method": "native recovery from saved vanilla-world blocks using the default cautious mode and deterministic quarter sample; exact expected seed checked; not a live Paper server test",
+  "kernel_benchmark": {
+    "seconds_per_run": 12,
+    "simd_lanes": 8,
+    "reference_billion_guesses_per_second": 2.66077,
+    "optimized_billion_guesses_per_second": 5.17409
   },
-  "fabric_loot_regression": {
-    "original_error_reproduced": true,
-    "cause": "Fabric loot-table wrapper requires a ServerLevel for holder lookup",
-    "fix": "Evaluate vanilla loot pools directly, preserving seeded functions and vanilla chest arrangement",
-    "versions": {
-      "26.2": {
-        "loot_cases": 384,
-        "matching_cities": 3,
-        "server_loot_events_called": false,
-        "passed": true
-      },
-      "26.3": {
-        "loot_cases": 384,
-        "matching_cities": 3,
-        "server_loot_events_called": false,
-        "passed": true
-      }
+  "live_paper_server": "not tested",
+  "windows_gui_runtime": "not tested",
+  "github_run": 39845620621,
+  "release_assets": {
+    "26.2": {
+      "file": "artifacts/seedy-0.9.10+26.2.jar",
+      "bytes": 33829396,
+      "sha256": "3a74326cac33484c6d25ebbcc2403d71200a63925c20dd51804cfd8dd264ad69",
+      "native_libraries_verified": 16
+    },
+    "26.3": {
+      "file": "artifacts/seedy-0.9.10+26.3.jar",
+      "bytes": 33829861,
+      "sha256": "fe5a5da7d77d90484ae031ea137ee5ff68027910bd2dbd73a339bb0125a43e18",
+      "native_libraries_verified": 16
     }
   },
-  "dimension_search": {
-    "seed": "2589511696370800371",
-    "end_origin": [
-      3200,
-      72,
-      3200
-    ],
-    "radius": 2048,
-    "with_ship": 5,
-    "without_ship": 6,
-    "checks": [
-      "dimension-specific structure and biome catalogs",
-      "Nether fortress and bastion selection preserves vanilla weighted generation",
-      "biome sampling remains correct after dimension and seed changes",
-      "End-city ship filters compared with generated ship templates",
-      "elytra marker coordinates lie within generated ships",
-      "new End-city synchronization mixin verified in real Fabric clients"
-    ]
-  },
-  "seed_map": {
-    "seed": "2589511696370800371",
-    "viewport_bounds": [
-      -2048,
-      -2048,
-      2047,
-      2047
-    ],
-    "structures": "minecraft:villages",
-    "cache_limits": {
-      "biome_tiles": 512,
-      "structure_tiles": 64,
-      "structure_starts": 512
-    },
-    "visible_limits": {
-      "biome_tiles": 256,
-      "structure_tiles": 25
-    },
-    "versions": {
-      "26.2": {
-        "cold_ms": 1079,
-        "cached_ms": 15,
-        "payload_bytes": 28639,
-        "markers": 19,
-        "detailed_ms": 2139,
-        "detailed_payload_bytes": 151541
-      },
-      "26.3": {
-        "cold_ms": 118,
-        "cached_ms": 11,
-        "payload_bytes": 28769,
-        "markers": 19,
-        "detailed_ms": 992,
-        "detailed_payload_bytes": 152152
-      }
-    },
-    "limitations": [
-      "Biome slice at selected Y; not a terrain elevation map",
-      "Coarse sampling at distant zoom; structure dots require closer zoom",
-      "Vanilla generation for the current game version; custom generation and older chunks can differ"
-    ],
-    "native_frame_cpu_ms": 0.255843,
-    "native_frame_vertices": 64572,
-    "benchmark_note": "headless UI construction and draw-list generation on this Mac; not an in-game FPS or GPU benchmark"
-  },
-  "window_gui": {
-    "default_size": [
-      1040,
-      760
-    ],
-    "preferences": "config/seedy/ui.json",
-    "zoom_blocks_per_pixel": [
-      0.125,
-      1024
-    ],
-    "zoom_presets": 6,
-    "detail_tile_budgets": {
-      "fast": 64,
-      "balanced": 128,
-      "detailed": 256
-    },
-    "checks": [
-      "preference round-trip and validation",
-      "damaged settings preserved on read",
-      "actual mouse edge resizing",
-      "maximize and restore geometry",
-      "sidebar toggle and mouse resizing",
-      "zoom presets and limits",
-      "detail and chunk grid controls",
-      "settings flushed on panel close",
-      "live native map request/response and saved preferences on both Minecraft versions"
-    ]
-  }
+  "ci_result": "all six jobs passed",
+  "github_run_url": "https://github.com/riye-prog/seedy/actions/runs/39845620621",
+  "windows_kernel_runtime": "passed in GitHub Actions"
 }

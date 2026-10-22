@@ -1,0 +1,90 @@
+{
+  "version": "0.9.10",
+  "source_commit": "2d473375a459590ed93f504ff21e74c9adb7bd13",
+  "hardware": {
+    "cpu": "Apple M3",
+    "logical_cpus": 8,
+    "scan_workers": 7
+  },
+  "java_tests": {
+    "26.2": {
+      "tests": 42,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0
+    },
+    "26.3": {
+      "tests": 42,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0
+    }
+  },
+  "native_kernel_equivalence": {
+    "known_states": 256,
+    "search_windows": 16384,
+    "candidate_emission_compared": true,
+    "local_passed": [
+      "macos-arm64",
+      "macos-x86_64 under Rosetta"
+    ],
+    "ci_status": "passed",
+    "ci_platforms": [
+      "macos-arm64",
+      "macos-x86_64",
+      "windows-x86_64"
+    ]
+  },
+  "native_panel_interaction": "passed locally",
+  "overworld_fixtures": [
+    {
+      "minecraft": "26.2",
+      "chunks": 924,
+      "raw_blocks": 49,
+      "seed": "2589511696370800371",
+      "exact_seed_recovered": true,
+      "seconds": 166.244,
+      "previous_recorded_seconds": 353.298
+    },
+    {
+      "minecraft": "26.2",
+      "chunks": 1089,
+      "raw_blocks": 144,
+      "expected_rng_state_recovered": true
+    },
+    {
+      "minecraft": "26.3",
+      "chunks": 1089,
+      "raw_blocks": 328,
+      "exact_seed_recovered": true,
+      "seconds": 61.4004
+    }
+  ],
+  "fixture_method": "native recovery from saved vanilla-world blocks using the default cautious mode and deterministic quarter sample; exact expected seed checked; not a live Paper server test",
+  "kernel_benchmark": {
+    "seconds_per_run": 12,
+    "simd_lanes": 8,
+    "reference_billion_guesses_per_second": 2.66077,
+    "optimized_billion_guesses_per_second": 5.17409
+  },
+  "live_paper_server": "not tested",
+  "windows_gui_runtime": "not tested",
+  "github_run": 39845620621,
+  "release_assets": {
+    "26.2": {
+      "file": "artifacts/seedy-0.9.10+26.2.jar",
+      "bytes": 33829396,
+      "sha256": "3a74326cac33484c6d25ebbcc2403d71200a63925c20dd51804cfd8dd264ad69",
+      "native_libraries_verified": 16
+    },
+    "26.3": {
+      "file": "artifacts/seedy-0.9.10+26.3.jar",
+      "bytes": 33829861,
+      "sha256": "fe5a5da7d77d90484ae031ea137ee5ff68027910bd2dbd73a339bb0125a43e18",
+      "native_libraries_verified": 16
+    }
+  },
+  "ci_result": "all six jobs passed",
+  "github_run_url": "https://github.com/riye-prog/seedy/actions/runs/39845620621",
+  "windows_kernel_runtime": "passed in GitHub Actions"
+}
