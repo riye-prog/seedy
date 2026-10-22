@@ -190,8 +190,10 @@ static bool beginDataTable(const char *name, int columns, ImGuiTableFlags flags,
 
 static void dataTableHeadersRow() {
     ImGui::PushStyleColor(ImGuiCol_TableHeaderBg, {0,0,0,0});
+    ImGui::PushStyleColor(ImGuiCol_HeaderHovered, {0,0,0,0});
+    ImGui::PushStyleColor(ImGuiCol_HeaderActive, {0,0,0,0});
     ImGui::TableHeadersRow();
-    ImGui::PopStyleColor();
+    ImGui::PopStyleColor(3);
 }
 
 static void recoveryPanel(Json &command) {
