@@ -3,7 +3,14 @@
   "id": "seedy",
   "version": "${version}",
   "name": "Seedy",
-  "description": "Seed recovery and world-generation tools with an in-process native interface.",
+  "description": "World seed recovery, structure finding, and biome maps.",
+  "authors": ["riye-prog"],
+  "icon": "assets/seedy/icon.png",
+  "contact": {
+    "homepage": "https://github.com/riye-prog/seedy",
+    "sources": "https://github.com/riye-prog/seedy",
+    "issues": "https://github.com/riye-prog/seedy/issues"
+  },
   "environment": "client",
   "license": "MIT",
   "entrypoints": { "client": ["dev.seedy.SeedyClient"] },

@@ -1,0 +1,37 @@
+{
+  "version": "0.9.11",
+  "mod_id": "seedy",
+  "icon": {
+    "path": "assets/seedy/icon.png",
+    "dimensions": [
+      512,
+      512
+    ],
+    "visual_review_sizes": [
+      512,
+      48
+    ]
+  },
+  "launcher_metadata_verified": true,
+  "launcher_parser_source": "https://github.com/PrismLauncher/PrismLauncher/blob/develop/launcher/minecraft/mod/tasks/LocalModParseTask.cpp#L284",
+  "live_prism_ui_tested": false,
+  "native_validation_base_release": "v0.9.10",
+  "native_validation_ci": "https://github.com/riye-prog/seedy/actions/runs/39845620621",
+  "scope": "launcher branding and metadata; packaged native binaries compared byte-for-byte with the verified release",
+  "release_assets": {
+    "26.2": {
+      "file": "artifacts/seedy-0.9.11+26.2.jar",
+      "bytes": 33856031,
+      "sha256": "bc9745a0edc2db10c7df788b416d6f7da5ccec54d255f22308c59836be1cdec7",
+      "native_libraries_equal_to_verified_release": 16,
+      "class_bytes_equal_to_verified_release": true
+    },
+    "26.3": {
+      "file": "artifacts/seedy-0.9.11+26.3.jar",
+      "bytes": 33856496,
+      "sha256": "9820cbef5fb0c1db6390e828e9ca8adbb05dfb9024fb127ccf7351812ef7a4cf",
+      "native_libraries_equal_to_verified_release": 16,
+      "class_bytes_equal_to_verified_release": true
+    }
+  }
+}
