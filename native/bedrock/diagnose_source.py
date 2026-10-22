@@ -5,6 +5,8 @@ import sys
 source = Path(sys.argv[1]).read_text()
 output = Path(sys.argv[2])
 target = "\tif(sol1.size()) constrain(sol1, O0, O1);"
+if "\tconfigureSolver();\n\tauto checkSolver" in source:
+    target = "\tconfigureSolver();\n\tauto checkSolver"
 diagnostic = """
 \tuint64_t knownI0 = 0, knownI1 = 0;
 \tif (const char* expected = std::getenv("SEEDY_TEST_SEED")) {
@@ -44,6 +46,15 @@ diagnostic = """
 \t\tprobe("raw", sol5, O8, O9);
 \t}
 """
+
+if "auto sol5 =" not in source:
+    diagnostic = diagnostic.replace('\t\tprobe("raw", sol5, O8, O9);', """\t\tsolver.push();
+\t\tconst std::array<z3::expr, 6> diagnosticStates{O4, O5, O6, O7, O8, O9};
+\t\tfor (uint64_t position : rawPositions) solver.add(rawOreConstraint(diagnosticStates, position));
+\t\tsolver.add(I0 == ctx.bv_val(actualI0, 64u));
+\t\tsolver.add(I1 == ctx.bv_val(actualI1, 64u));
+\t\tstd::printf("stage raw contains_true_state %d constraints %zu\\n", solver.check() == z3::sat, rawPositions.size());
+\t\tsolver.pop();""")
 
 enumeration_target = "\tcrackFP(i0, i1);"
 enumeration = """

@@ -232,11 +232,15 @@ static void recoveryPanel(Json &command) {
     ImGui::TextUnformatted("Loaded block patterns");
     ImGui::SameLine();
     ImGui::TextDisabled("%d chunks  ·  %d raw iron/copper blocks in %d chunks  ·  %d ore candidates", state.value("patternChunks", 0), state.value("patternRawBlocks", 0), state.value("patternRawChunks", 0), state.value("patternOreCandidates", 0));
-    if (state.value("patternRunning", false)) ImGui::TextDisabled("Pass %d", state.value("patternPass", 1));
+    if (state.value("patternRunning", false)) {
+        ImGui::TextDisabled("Pass %d / %d  ·  %s", state.value("patternPass", 1), state.value("patternPassCount", 4), state.value("patternPassSample", "").c_str());
+        auto previousPass = state.value("patternPreviousPass", "");
+        if (state.value("patternPass", 1) > 1 && !previousPass.empty()) ImGui::TextWrapped("Previous pass: %s", previousPass.c_str());
+    }
     ImGui::TextWrapped("%s", state.value("patternStatus", "Waiting for a world").c_str());
     bool blockRunning = state.value("patternRunning", false);
     double blockProgress = state.value("patternProgress", -1.0);
-    if (state.value("connected", false) && !state.value("verified", false) && !blockRunning) {
+    if (state.value("connected", false) && !state.value("verified", false) && !blockRunning && state.value("patternPass", 0) == 0) {
         double collection = state.value("patternCollectionProgress", 0.0);
         ImGui::TextDisabled("Nearby evidence  %.0f%%", collection * 100);
         ImGui::ProgressBar(static_cast<float>(collection), {-1, 7 * uiScale}, "");
@@ -248,8 +252,12 @@ static void recoveryPanel(Json &command) {
     if (blockRunning) {
         long elapsed = state.value("patternElapsedSeconds", 0L);
         long eta = state.value("patternEtaSeconds", -1L);
-        if (eta >= 0) ImGui::TextDisabled("%s elapsed  ·  about %s left", timeLabel(elapsed).c_str(), timeLabel(eta).c_str());
+        if (eta >= 0) ImGui::TextDisabled("%s elapsed  ·  estimated full scan: %s left", timeLabel(elapsed).c_str(), timeLabel(eta).c_str());
         else ImGui::TextDisabled("%s elapsed", timeLabel(elapsed).c_str());
+        ImGui::TextDisabled("Stage %d / 8  ·  %s in this stage", state.value("patternStage", 1), timeLabel(state.value("patternStageSeconds", 0L)).c_str());
+        if (state.value("patternRejectedStates", 0) > 0) ImGui::TextDisabled("%d random states rejected", state.value("patternRejectedStates", 0));
+    } else if (state.value("patternPass", 0) > 0) {
+        ImGui::TextDisabled("Last check: %s  ·  %d passes", timeLabel(state.value("patternElapsedSeconds", 0L)).c_str(), state.value("patternPass", 0));
     }
     ImGui::BeginDisabled(!state.value("patternCanTry", false));
     if (ImGui::Button("Try current data")) command = {{"action", "tryBlockRecovery"}};

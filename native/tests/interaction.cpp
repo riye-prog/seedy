@@ -88,7 +88,12 @@ int main(int argc, char **argv) {
         tick(); tick();
         require(click("Try current data").value("action", "") == "tryBlockRecovery", "Block recovery button did not activate");
         state["patternRunning"] = true;
-        state["patternPass"] = 1;
+        state["patternPass"] = 2;
+        state["patternPassCount"] = 4;
+        state["patternPassSample"] = "full sample, cautious checks";
+        state["patternStage"] = 8;
+        state["patternStageSeconds"] = 60;
+        state["patternPreviousPass"] = "This pass found no consistent random state";
         state["patternProgress"] = 0.25;
         tick(); tick();
         require(click("Stop block check").value("action", "") == "stopBlockRecovery", "Block recovery stop button did not activate");

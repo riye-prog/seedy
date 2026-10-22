@@ -12,10 +12,11 @@
 
 static std::atomic<bool> foundSeed{false};
 static uint64_t expectedSeed;
+static bool checkExpectedSeed;
 static bool stopAfterState;
 
 bool matchesWorldSeed(uint64_t seed) {
-    return expectedSeed == 0 || seed == expectedSeed;
+    return !checkExpectedSeed || seed == expectedSeed;
 }
 
 bool shouldContinueSearch() {
@@ -40,7 +41,7 @@ template void sendUpdate<uint64_t, uint64_t, uint64_t>(const char *, bool, uint6
 
 int main(int argc, char **argv) {
     if (argc < 2 || argc > 5) return 2;
-    if (argc >= 3) expectedSeed = std::stoull(argv[2]);
+    if (argc >= 3) { expectedSeed = std::stoull(argv[2]); checkExpectedSeed = true; }
     int mode = argc >= 4 ? std::stoi(argv[3]) : 31;
     stopAfterState = argc == 5 && std::string_view(argv[4]) == "state";
     std::ifstream input(argv[1], std::ios::binary);

@@ -11,6 +11,48 @@ old_vein = "xvs3.push_back({xv, 0.7, vein});"
 new_vein = "if (!cautious || vein) xvs3.push_back({xv, 0.7, vein});"
 old_filler = "xvs4.push_back({xv, 0.1, false});"
 new_filler = "if (!cautious) xvs4.push_back({xv, 0.1, false});"
+old_vein_loop = "\tfor(auto[x,y,z] : maybe_veins) {"
+new_vein_loop = old_vein_loop + "\n\t\tif ((y < -60 || y > -8) && (y < 0 || y > 50)) continue;"
+old_solver = "\tz3::solver solver(ctx);"
+old_first_solve = "\tauto sol1 = solve(xvs1, 1);"
+new_first_solve = """\tstd::vector<uint64_t> rawPositions;
+\tfor (auto [position, probability, raw] : xvs5) if (raw) rawPositions.push_back(position);
+\tstd::sort(rawPositions.begin(), rawPositions.end());
+\trawPositions.erase(std::unique(rawPositions.begin(), rawPositions.end()), rawPositions.end());
+\tbool useRawConstraints = cautious && rawPositions.size() >= 16;
+\tauto sol1 = solve(xvs1, 1);"""
+old_raw_constraint = "\tif(sol5.size()) constrain(sol5, O8, O9);"
+new_raw_constraint = """\tconst std::array<z3::expr, 6> rawStates{O4, O5, O6, O7, O8, O9};
+\tsize_t rawChecks = std::min<size_t>(32, rawPositions.size());
+\tstd::vector<uint64_t> rawRefinements;
+\tstd::vector<std::pair<uint64_t, uint64_t>> rejectedStates;
+\tunsigned int relaxedGroups = 0;
+\tsendUpdate("commands.bedrockcrack.rawEvidence", false, static_cast<uint64_t>(rawPositions.size()), static_cast<uint64_t>(rawChecks));
+\tauto configureSolver = [&] {
+\t\tsolver.reset();
+\t\tsolver.set("timeout", useRawConstraints && relaxedGroups < 2 ? 60000u : 0u);
+\t\tif (sol1.size()) constrain(sol1, O0, O1);
+\t\tif (sol2.size()) constrain(sol2, O2, O3);
+\t\tif (relaxedGroups < 2 && sol3.size()) constrain(sol3, O4, O5);
+\t\tif (relaxedGroups < 1 && sol4.size()) constrain(sol4, O6, O7);
+\t\tfor (size_t index = 0; index < rawChecks; index++)
+\t\t\tsolver.add(rawOreConstraint(rawStates, rawPositions[index * rawPositions.size() / rawChecks]));
+\t\tfor (uint64_t position : rawRefinements) solver.add(rawOreConstraint(rawStates, position));
+\t\tfor (auto [low, high] : rejectedStates) solver.add(I0 != ctx.bv_val(low, 64u) || I1 != ctx.bv_val(high, 64u));
+\t};
+\tconfigureSolver();
+\tauto checkSolver = [&] {
+\t\twhile (shouldContinueSearch()) {
+\t\t\tauto result = cancellableSolverCheck(solver, shouldContinueSearch);
+\t\t\tbool timedOut = result == z3::unknown && (solver.reason_unknown() == "timeout" || solver.reason_unknown() == "canceled");
+\t\t\tif (!useRawConstraints || relaxedGroups == 2 || (result != z3::unsat && !timedOut)) return result;
+\t\t\tif (!shouldContinueSearch()) return z3::unknown;
+\t\t\trelaxedGroups++;
+\t\t\tsendUpdate(timedOut ? "commands.bedrockcrack.solverTimeLimit" : "commands.bedrockcrack.relaxingOreEvidence", false, static_cast<uint64_t>(relaxedGroups));
+\t\t\tconfigureSolver();
+\t\t}
+\t\treturn z3::unknown;
+\t};"""
 old_return = "\tfloat r = (out >> 40) * 0x1.0p-24;\n\treturn double(r) < p;"
 new_return = "\treturn (out >> 40) < cutoff;"
 old_empty = "\tif(xvs.size() == 0)\n\t\treturn {};"
@@ -29,6 +71,7 @@ new_scan = """\tauto randomLong = [](uint64_t low, uint64_t high) {
 \t\tlow = std::rotl(low, 49) ^ difference ^ difference << 21;
 \t\thigh = std::rotl(difference, 28);
 \t};
+\tstd::vector<uint64_t> rawMismatches;
 \tauto validate = [&](uint64_t modelLow, uint64_t modelHigh) {
 \t\tauto countErrors = [&](const auto& observations, uint64_t saltLow, uint64_t saltHigh) {
 \t\t\tuint64_t low = modelLow ^ saltLow;
@@ -51,21 +94,45 @@ new_scan = """\tauto randomLong = [](uint64_t low, uint64_t high) {
 \t\tauto [veinErrors, veinChecked] = countErrors(xvs3, 11207227798492025197ull, 3091299299654006625ull);
 \t\tsize_t errors = bedrockErrors + deepslateErrors;
 \t\tsize_t checked = bedrockChecked + deepslateChecked;
+\t\tuint64_t oreLow = modelLow ^ 11207227798492025197ull;
+\t\tuint64_t oreHigh = modelHigh ^ 3091299299654006625ull;
+\t\tuint64_t forkLow = randomLong(oreLow, oreHigh);
+\t\tadvance(oreLow, oreHigh);
+\t\tuint64_t forkHigh = randomLong(oreLow, oreHigh);
+\t\tstd::array<uint64_t, 6> numericRawStates{forkLow, forkHigh};
+\t\tfor (size_t call = 1; call < 3; call++) {
+\t\t\tadvance(forkLow, forkHigh);
+\t\t\tnumericRawStates[call * 2] = forkLow;
+\t\t\tnumericRawStates[call * 2 + 1] = forkHigh;
+\t\t}
+\t\trawMismatches.clear();
+\t\tfor (uint64_t position : rawPositions) if (!rawOreMatches(numericRawStates, position)) rawMismatches.push_back(position);
 \t\treturn std::tuple{errors, checked, veinErrors, veinChecked};
 \t};
-\tsendUpdate("commands.bedrockcrack.validatingRandomState", false);
-\tfor (uint64_t index = 0; index < 3 && shouldContinueSearch(); index++) {
+\tuint64_t candidateLimit = useRawConstraints ? 8 : 3;
+\tfor (uint64_t index = 0; index < candidateLimit && shouldContinueSearch(); index++) {
+\t\tsendUpdate("commands.bedrockcrack.validatingRandomState", false);
 \t\tauto [errors, checked, veinErrors, veinChecked] = validate(i0, i1);
 \t\tbool baseMatches = checked < 1024 || errors <= std::max<size_t>(8, checked / 100);
-\t\tbool veinMatches = veinChecked < 256 || veinErrors * 50 <= veinChecked * 9;
-\t\tif (baseMatches && veinMatches) {
+\t\tbool veinMatches = useRawConstraints || veinChecked < 256 || veinErrors * 50 <= veinChecked * 9;
+\t\tif (baseMatches && veinMatches && rawMismatches.empty()) {
 \t\t\tsendUpdate("commands.bedrockcrack.crackedRandomStateRandom", false, i0, i1);
 \t\t\tcrackFP(i0, i1);
 \t\t\treturn;
 \t\t}
 \t\tsendUpdate("commands.bedrockcrack.stateCandidateRejected", false, index + 1, static_cast<uint64_t>(veinErrors), static_cast<uint64_t>(veinChecked));
+\t\tif (index + 1 == candidateLimit) break;
+\t\tsize_t refinements = std::min<size_t>(16, rawMismatches.size());
+\t\tfor (size_t added = 0; added < refinements; added++)
+\t\t{
+\t\t\tuint64_t position = rawMismatches[added * rawMismatches.size() / refinements];
+\t\t\trawRefinements.push_back(position);
+\t\t\tsolver.add(rawOreConstraint(rawStates, position));
+\t\t}
+\t\trejectedStates.emplace_back(i0, i1);
 \t\tsolver.add(I0 != ctx.bv_val(i0, 64u) || I1 != ctx.bv_val(i1, 64u));
-\t\tauto nextResult = solver.check();
+\t\tsendUpdate("commands.bedrockcrack.startingZ3Search", false);
+\t\tauto nextResult = checkSolver();
 \t\tif (nextResult != z3::sat) {
 \t\t\tsendUpdate(nextResult == z3::unsat ? "commands.bedrockcrack.stateValidationFailed" : "commands.bedrockcrack.Z3Failed", false);
 \t\t\treturn;
@@ -83,6 +150,19 @@ expected_counts = {
     mode_assertion: 1,
     old_vein: 1,
     old_filler: 1,
+    old_vein_loop: 1,
+    old_solver: 1,
+    old_first_solve: 1,
+    old_raw_constraint: 1,
+    "\tauto sol3 = solve(xvs3, 3);": 1,
+    "\tauto sol4 = solve(xvs4, 4);": 1,
+    "\tauto sol5 = solve(xvs5, 5);": 1,
+    "\tif(sol1.size()) constrain(sol1, O0, O1);": 1,
+    "\tif(sol2.size()) constrain(sol2, O2, O3);": 1,
+    "\tif(sol3.size()) constrain(sol3, O4, O5);": 1,
+    "\tif(sol4.size()) constrain(sol4, O6, O7);": 1,
+    "\tz3::check_result res = solver.check();": 1,
+    "\tfor(; iters < 21; iters++)\n\t{": 1,
     old_return: 1,
     old_empty: 1,
     old_scan: 1,
@@ -92,7 +172,7 @@ expected_counts = {
 if any(source.count(value) != count for value, count in expected_counts.items()):
     raise SystemExit("unexpected bedrock solver source")
 
-source = source.replace("#include <algorithm>", "#include <algorithm>\n#include <cmath>", 1)
+source = source.replace("#include <algorithm>", '#include <algorithm>\n#include <cmath>\n#include "raw_constraints.h"\n#include "solver_control.h"', 1)
 source = source.replace("static bool get(uint64_t seedlo, uint64_t seedhi, uint64_t xv, double p)", "static bool get(uint64_t seedlo, uint64_t seedhi, uint64_t xv, uint32_t cutoff)", 1)
 source = source.replace("static std::vector<std::bitset<128>> solve(std::vector<std::tuple<uint64_t, double, bool>> xvs, int mode)", "static std::vector<std::bitset<128>> solve(const std::vector<std::tuple<uint64_t, double, bool>>& xvs, int mode)", 1)
 source = source.replace(old_return, new_return, 1)
@@ -102,6 +182,19 @@ source = source.replace("xv, p) != ret", "xv, cutoff) != ret")
 source = source.replace(mode_assertion, mode_selection, 1)
 source = source.replace(old_vein, new_vein, 1)
 source = source.replace(old_filler, new_filler, 1)
+source = source.replace(old_vein_loop, new_vein_loop, 1)
+source = source.replace(old_first_solve, new_first_solve, 1)
+source = source.replace("\tauto sol5 = solve(xvs5, 5);", "", 1)
+for number, first, second in ((1, 0, 1), (2, 2, 3), (3, 4, 5), (4, 6, 7)):
+    source = source.replace(f"\tif(sol{number}.size()) constrain(sol{number}, O{first}, O{second});", "", 1)
+source = source.replace(old_raw_constraint, new_raw_constraint, 1)
+source = source.replace("\tz3::check_result res = solver.check();", "\tz3::check_result res = checkSolver();", 1)
+source = source.replace("\tfor(; iters < 21; iters++)\n\t{", "\tfor(; iters < 21; iters++)\n\t{\n\t\tif (!shouldContinueSearch()) return {};", 1)
+for number in range(1, 6):
+    event = f'\tsendUpdate("commands.bedrockcrack.completedBitSearch{number}", false);'
+    if source.count(event) != 1:
+        raise SystemExit("unexpected bit search event")
+    source = source.replace(event, event + "\n\tif (!shouldContinueSearch()) return;", 1)
 source = source.replace(old_scan, new_scan, 1)
 
 output.parent.mkdir(parents=True, exist_ok=True)

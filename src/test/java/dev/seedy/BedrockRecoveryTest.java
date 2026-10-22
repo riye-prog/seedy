@@ -38,10 +38,10 @@ class BedrockRecoveryTest {
             assertEquals(1, recovery.scannedChunks());
             assertEquals(2, recovery.rawBlocks());
             assertEquals(1, recovery.rawChunks());
-            assertEquals(2, recovery.oreCandidates());
+            assertEquals(1, recovery.oreCandidates());
             recovery.scan(chunk);
             assertEquals(2, recovery.rawBlocks());
-            assertEquals(2, recovery.oreCandidates());
+            assertEquals(1, recovery.oreCandidates());
             chunk.setBlockState(iron, Blocks.STONE.defaultBlockState(), 0);
             recovery.scan(chunk);
             assertEquals(1, recovery.rawBlocks());
@@ -68,6 +68,22 @@ class BedrockRecoveryTest {
         assertTrue(java.util.Arrays.stream(sampled).anyMatch(value -> value == nearbyOre));
         assertTrue(java.util.Arrays.stream(sampled).anyMatch(value -> value == nearbyFiller));
         assertArrayEquals(sampled, BedrockRecovery.sampleAbundant(compact, 3));
+    }
+
+    @Test void ordinaryDepositsDoNotCountAsVeinEvidence() {
+        assertEquals(-1, BedrockRecovery.classify(Blocks.DEEPSLATE_COPPER_ORE, 4));
+        assertEquals(-1, BedrockRecovery.classify(Blocks.DEEPSLATE_IRON_ORE, 4));
+        assertEquals(-1, BedrockRecovery.classify(Blocks.COPPER_ORE, -14));
+        assertEquals(-1, BedrockRecovery.classify(Blocks.GRANITE, -30));
+        assertEquals(-1, BedrockRecovery.classify(Blocks.TUFF, 20));
+        assertEquals(-1, BedrockRecovery.classify(Blocks.RAW_IRON_BLOCK, 20));
+        assertEquals(-1, BedrockRecovery.classify(Blocks.RAW_COPPER_BLOCK, -30));
+        assertEquals(1, BedrockRecovery.classify(Blocks.RAW_IRON_BLOCK, -60));
+        assertEquals(1, BedrockRecovery.classify(Blocks.RAW_COPPER_BLOCK, 50));
+        assertEquals(2, BedrockRecovery.classify(Blocks.DEEPSLATE_IRON_ORE, -8));
+        assertEquals(2, BedrockRecovery.classify(Blocks.COPPER_ORE, 0));
+        assertEquals(3, BedrockRecovery.classify(Blocks.TUFF, -30));
+        assertEquals(3, BedrockRecovery.classify(Blocks.GRANITE, 20));
     }
 
     private static long entry(int x, int y, int z, int type) {
