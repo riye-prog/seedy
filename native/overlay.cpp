@@ -61,10 +61,12 @@ static void configureAppearance(float scale) {
     headingFont = io.Fonts->AddFontFromMemoryTTF(const_cast<unsigned char *>(font_data), sizeof(font_data), 22 * uiScale, &fontConfig);
     ImGui::StyleColorsDark();
     auto &style = ImGui::GetStyle();
-    style.WindowRounding = 12;
-    style.FrameRounding = 7;
-    style.ChildRounding = 10;
-    style.TabRounding = 5;
+    style.WindowRounding = 14;
+    style.FrameRounding = 9;
+    style.ChildRounding = 12;
+    style.PopupRounding = 10;
+    style.TabRounding = 7;
+    style.ScrollbarRounding = 8;
     style.WindowPadding = {22, 20};
     style.FramePadding = {13, 9};
     style.ItemSpacing = {11, 11};
@@ -167,6 +169,31 @@ static void sectionHeading(const char *title, const char *description = nullptr)
     ImGui::Dummy({0,5 * uiScale});
 }
 
+static bool compactButton(const char *name) {
+    ImGui::PushStyleVar(ImGuiStyleVar_FramePadding, {ImGui::GetStyle().FramePadding.x,4 * uiScale});
+    bool pressed = ImGui::Button(name);
+    ImGui::PopStyleVar();
+    return pressed;
+}
+
+static bool beginDataTable(const char *name, int columns, ImGuiTableFlags flags, ImVec2 size = {0,0}) {
+    auto position = ImGui::GetCursorScreenPos();
+    float width = size.x > 0 ? size.x : ImGui::GetContentRegionAvail().x;
+    float headerHeight = ImGui::GetTextLineHeight() + ImGui::GetStyle().CellPadding.y * 2;
+    ImGui::GetWindowDrawList()->AddRectFilled(position, {position.x + width,position.y + headerHeight}, ImGui::GetColorU32(ImGuiCol_TableHeaderBg), 8 * uiScale);
+    ImGui::PushStyleColor(ImGuiCol_ChildBg, {0,0,0,0});
+    bool visible = ImGui::BeginTable(name, columns, flags | ImGuiTableFlags_PadOuterX, size);
+    ImGui::PopStyleColor();
+    if (visible && (flags & ImGuiTableFlags_ScrollY)) ImGui::TableSetupScrollFreeze(0, 1);
+    return visible;
+}
+
+static void dataTableHeadersRow() {
+    ImGui::PushStyleColor(ImGuiCol_TableHeaderBg, {0,0,0,0});
+    ImGui::TableHeadersRow();
+    ImGui::PopStyleColor();
+}
+
 static void recoveryPanel(Json &command) {
     sectionHeading("Seed recovery", "Collect evidence as you play. Choose what to check, then start a search.");
     bool running = state.value("recovering", false);
@@ -267,15 +294,16 @@ static void recoveryPanel(Json &command) {
     ImGui::TextUnformatted(state.value("recoveryStatus", "Idle").c_str());
     ImGui::PopTextWrapPos();
     if (running) ImGui::ProgressBar(static_cast<float>(state.value("progress", 0.0)), {-1, 5 * uiScale}, "");
-    if (ImGui::BeginChild("observations", {0, 145 * uiScale}, ImGuiChildFlags_None)) {
+    ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, {12 * uiScale,12 * uiScale});
+    if (ImGui::BeginChild("observations", {0, 169 * uiScale}, ImGuiChildFlags_AlwaysUseWindowPadding)) {
         if (observations.empty()) ImGui::TextWrapped("Explore shipwrecks, trial chambers, desert pyramids, or swamp huts. Detected start chunks appear here. For trial chambers, load the starting room as well as the corridors.");
-        else if (ImGui::BeginTable("observation-list", 5, ImGuiTableFlags_RowBg | ImGuiTableFlags_SizingStretchProp)) {
+        else if (beginDataTable("observation-list", 5, ImGuiTableFlags_RowBg | ImGuiTableFlags_SizingStretchProp)) {
             ImGui::TableSetupColumn("Use", ImGuiTableColumnFlags_WidthFixed, 50 * uiScale);
             ImGui::TableSetupColumn("Structure", 0, 2);
             ImGui::TableSetupColumn("Start chunk", 0, 1.4f);
             ImGui::TableSetupColumn("Source");
-            ImGui::TableSetupColumn("", ImGuiTableColumnFlags_WidthFixed, 68 * uiScale);
-            ImGui::TableHeadersRow();
+            ImGui::TableSetupColumn("", ImGuiTableColumnFlags_WidthFixed, ImGui::CalcTextSize("Remove").x + ImGui::GetStyle().FramePadding.x * 2);
+            dataTableHeadersRow();
             for (auto &entry : observations) {
                 ImGui::PushID(entry.at("id").get<std::string>().c_str());
                 ImGui::TableNextRow(); ImGui::TableNextColumn();
@@ -284,13 +312,14 @@ static void recoveryPanel(Json &command) {
                 ImGui::TableNextColumn(); ImGui::TextUnformatted(label(entry.at("structure")).c_str());
                 ImGui::TableNextColumn(); ImGui::Text("%d, %d", entry.at("chunkX").get<int>(), entry.at("chunkZ").get<int>());
                 ImGui::TableNextColumn(); ImGui::TextDisabled("%s", entry.at("source").get<std::string>().c_str());
-                ImGui::TableNextColumn(); if (ImGui::SmallButton("Remove")) command = {{"action", "remove"}, {"id", entry.at("id")}};
+                ImGui::TableNextColumn(); if (compactButton("Remove")) command = {{"action", "remove"}, {"id", entry.at("id")}};
                 ImGui::PopID();
             }
             ImGui::EndTable();
         }
     }
     ImGui::EndChild();
+    ImGui::PopStyleVar();
     if (ImGui::CollapsingHeader("Add observation")) {
         static int type = 0, chunks[2] = {0,0};
         ImGui::SetNextItemWidth(230 * uiScale);
@@ -308,11 +337,11 @@ static void recoveryPanel(Json &command) {
     auto checks = state.value("placementChecks", Json::array());
     if (!state.value("verified", false)) ImGui::TextDisabled("Verify the world seed first to check Paper settings.");
     else if (checks.empty()) ImGui::TextDisabled("No observed structure starts to compare yet.");
-    else if (ImGui::BeginTable("paper-checks", 3, ImGuiTableFlags_RowBg | ImGuiTableFlags_SizingStretchProp)) {
+    else if (beginDataTable("paper-checks", 3, ImGuiTableFlags_RowBg | ImGuiTableFlags_SizingStretchProp)) {
         ImGui::TableSetupColumn("Structure", 0, 2);
         ImGui::TableSetupColumn("Default matches", 0, 1);
         ImGui::TableSetupColumn("Status", 0, 2);
-        ImGui::TableHeadersRow();
+        dataTableHeadersRow();
         for (const auto &check : checks) {
             ImGui::TableNextRow();
             ImGui::TableNextColumn(); ImGui::TextUnformatted(label(check.value("structure", "")).c_str());
@@ -364,11 +393,11 @@ static void chestDetails(const Json &entry, Json &command) {
         bool expanded = ImGui::TreeNodeEx(heading.c_str(), wanted ? ImGuiTreeNodeFlags_DefaultOpen : ImGuiTreeNodeFlags_None);
         if (wanted) ImGui::PopStyleColor();
         if (expanded) {
-            if (ImGui::SmallButton("Copy chest")) command = {{"action","copy"},{"text",coordinatesOf(chest)}};
+            if (compactButton("Copy chest")) command = {{"action","copy"},{"text",coordinatesOf(chest)}};
             if (!chest.contains("y") || chest["y"].is_null()) { ImGui::SameLine(); ImGui::TextDisabled("X / Z; height is resolved when loaded"); }
             auto warning = chest.value("warning", "");
             if (!warning.empty()) ImGui::TextWrapped("%s", warning.c_str());
-            else if (ImGui::BeginTable("items", 2, ImGuiTableFlags_RowBg | ImGuiTableFlags_SizingStretchProp)) {
+            else if (ImGui::BeginTable("items", 2, ImGuiTableFlags_RowBg | ImGuiTableFlags_SizingStretchProp | ImGuiTableFlags_PadOuterX)) {
                 ImGui::TableSetupColumn("Count", ImGuiTableColumnFlags_WidthFixed, 48 * uiScale);
                 ImGui::TableSetupColumn("Item");
                 for (const auto &item : chest.at("items")) {
@@ -439,12 +468,12 @@ static void locatePanel(Json &command) {
                     ImGui::SameLine(); ImGui::SetNextItemWidth(92 * uiScale);
                     if (ImGui::InputInt("##minimum", &lootAmounts[i], 1, 10)) { lootAmounts[i] = std::clamp(lootAmounts[i],1,99999); command = {{"action","cancelSearch"}}; }
                     ImGui::SameLine();
-                    bool remove = ImGui::SmallButton("Remove");
+                    bool remove = compactButton("Remove");
                     ImGui::PopID();
                     if (remove) { lootItems.erase(lootItems.begin() + i); lootAmounts.erase(lootAmounts.begin() + i); command = {{"action","cancelSearch"}}; break; }
                 }
                 ImGui::BeginDisabled(lootItems.size() >= 8);
-                if (ImGui::SmallButton("Add item")) { int next = 0; while (std::find(lootItems.begin(),lootItems.end(),next) != lootItems.end()) next++; lootItems.push_back(next); lootAmounts.push_back(1); command = {{"action","cancelSearch"}}; }
+                if (compactButton("Add item")) { int next = 0; while (std::find(lootItems.begin(),lootItems.end(),next) != lootItems.end()) next++; lootItems.push_back(next); lootAmounts.push_back(1); command = {{"action","cancelSearch"}}; }
                 ImGui::EndDisabled();
                 if (lootItems.empty()) { ImGui::SameLine(); ImGui::TextDisabled("Showing all structures with chest contents"); }
             }
@@ -468,16 +497,20 @@ static void locatePanel(Json &command) {
     if (!results.empty()) ImGui::TextDisabled("%zu results in %s", results.size(), label(results[0].value("dimension", "overworld")).c_str());
     int detailIndex = state.value("chestDetailIndex", -1);
     if (command.value("action", "") == "cancelSearch") detailIndex = -1;
-    if (ImGui::BeginTable("locations", 3, ImGuiTableFlags_RowBg | ImGuiTableFlags_ScrollY, {0, 145 * uiScale})) {
+    ImGui::Dummy({0,5 * uiScale});
+    if (beginDataTable("locations", 3, ImGuiTableFlags_RowBg | ImGuiTableFlags_ScrollY, {0, 180 * uiScale})) {
         ImGui::TableSetupColumn("Coordinates", ImGuiTableColumnFlags_WidthStretch);
         ImGui::TableSetupColumn("Distance", ImGuiTableColumnFlags_WidthFixed, 105 * uiScale);
-        ImGui::TableSetupColumn("", ImGuiTableColumnFlags_WidthFixed, 116 * uiScale);
-        ImGui::TableHeadersRow();
+        float actionsWidth = ImGui::CalcTextSize("Copy").x + ImGui::CalcTextSize("Saved").x + ImGui::GetStyle().FramePadding.x * 4 + ImGui::GetStyle().ItemSpacing.x;
+        ImGui::TableSetupColumn("", ImGuiTableColumnFlags_WidthFixed, actionsWidth);
+        dataTableHeadersRow();
+        ImGui::PushStyleVar(ImGuiStyleVar_FramePadding, {ImGui::GetStyle().FramePadding.x,4 * uiScale});
         for (size_t i = 0; i < results.size(); i++) {
             auto &entry = results[i];
             std::string coordinates = std::to_string(entry.at("x").get<int>()) + " " + (entry.contains("y") && !entry["y"].is_null() ? std::to_string(entry["y"].get<int>()) + " " : "") + std::to_string(entry.at("z").get<int>());
             ImGui::PushID(static_cast<int>(i));
             ImGui::TableNextRow(); ImGui::TableNextColumn();
+            ImGui::AlignTextToFramePadding();
             bool hasLoot = entry.contains("loot") && !entry["loot"].is_null();
             if (hasLoot) {
                 if (ImGui::Selectable((coordinates + "##chests").c_str(), detailIndex == static_cast<int>(i))) command = {{"action","chests"},{"index",i},{"generation",state.value("searchGeneration",0LL)}};
@@ -491,24 +524,25 @@ static void locatePanel(Json &command) {
             if (entry.value("name", "") == "minecraft:end_city") {
                 bool elytra = entry.contains("elytra") && !entry["elytra"].is_null();
                 ImGui::TextDisabled("%s", elytra ? "With elytra ship" : "Without elytra ship");
-                if (elytra && ImGui::SmallButton("Copy elytra")) command = {{"action","copy"},{"text",coordinatesOf(entry["elytra"])}};
+                if (elytra && compactButton("Copy elytra")) command = {{"action","copy"},{"text",coordinatesOf(entry["elytra"])}};
             }
-            ImGui::TableNextColumn(); ImGui::Text("%lld blocks", entry.at("distance").get<long long>());
-            ImGui::TableNextColumn(); if (ImGui::SmallButton("Copy")) command = {{"action","copy"},{"text",coordinates}};
+            ImGui::TableNextColumn(); ImGui::AlignTextToFramePadding(); ImGui::Text("%lld blocks", entry.at("distance").get<long long>());
+            ImGui::TableNextColumn(); if (compactButton("Copy")) command = {{"action","copy"},{"text",coordinates}};
             ImGui::SameLine();
             auto saved = state.value("savedLocations", Json::array());
             bool exists = std::any_of(saved.begin(), saved.end(), [&](const Json &location) { return location.value("name", "") == entry.value("name", "") && location.value("dimension", "") == entry.value("dimension", "") && location.value("x", 0) == entry.value("x", 0) && location.value("z", 0) == entry.value("z", 0) && location.value("y", Json()) == entry.value("y", Json()); });
             ImGui::BeginDisabled(exists || !state.value("connected", false));
-            if (ImGui::SmallButton(exists ? "Saved" : "Save")) command = {{"action","pin"},{"index",i},{"generation",state.value("searchGeneration",0LL)}};
+            if (compactButton(exists ? "Saved" : "Save")) command = {{"action","pin"},{"index",i},{"generation",state.value("searchGeneration",0LL)}};
             ImGui::EndDisabled();
             ImGui::PopID();
         }
+        ImGui::PopStyleVar();
         ImGui::EndTable();
     }
     if (results.empty() && state.value("searchStatus", "Idle") == "Complete") ImGui::TextWrapped("No matches in this area. Adjust the filters or search radius.");
     if (detailIndex >= 0 && detailIndex < static_cast<int>(results.size()) && state.contains("chestDetails")) {
         ImGui::Dummy({0,8 * uiScale});
-        if (ImGui::SmallButton("Close chest details")) { detailIndex = -1; command = {{"action","closeChests"}}; }
+        if (compactButton("Close chest details")) { detailIndex = -1; command = {{"action","closeChests"}}; }
         if (detailIndex >= 0) chestDetails(state["chestDetails"], command);
     }
 }
@@ -531,9 +565,9 @@ static void savedPanel(Json &command) {
             int direction = (static_cast<int>(std::round(std::atan2(dz, dx) * 4 / 3.141592653589793)) + 8) % 8;
             ImGui::SameLine(); ImGui::TextDisabled("%.0f blocks %s", std::hypot(dx,dz), directions[direction]);
         }
-        if (ImGui::SmallButton("Copy")) command = {{"action","copy"},{"text",coordinates}};
+        if (compactButton("Copy")) command = {{"action","copy"},{"text",coordinates}};
         ImGui::SameLine();
-        if (ImGui::SmallButton("Remove")) command = {{"action","unpin"},{"id",entry.at("id")}};
+        if (compactButton("Remove")) command = {{"action","unpin"},{"id",entry.at("id")}};
         ImGui::PopID();
     }
 }
@@ -603,7 +637,7 @@ static Json drawPanel(int width, int height) {
         ImGui::SameLine();
         if (ImGui::Button("X##close", {32 * uiScale,30 * uiScale})) command = {{"action","close"}};
         const char *sections[] = {"Recovery##nav", "Locate##nav", "Seed##nav", "Saved##nav", "World##nav", "Map##nav", "Settings##nav"};
-        int columns = ImGui::GetContentRegionAvail().x < 620 * uiScale ? 4 : 7;
+        int columns = ImGui::GetContentRegionAvail().x < 7 * 96 * uiScale + 6 * ImGui::GetStyle().ItemSpacing.x ? 4 : 7;
         float navWidth = (ImGui::GetContentRegionAvail().x - (columns - 1) * ImGui::GetStyle().ItemSpacing.x) / columns;
         const int navigationOrder[] = {5,1,0,2,3,4,6};
         for (int slot = 0; slot < 7; slot++) {

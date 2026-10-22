@@ -74,8 +74,10 @@ static void settingsPanel() {
     ImGui::SetNextItemWidth(240 * uiScale);
     ImGui::SliderFloat("Sidebar width", &preferences.sidebarWidth,180,400,"%.0f px");
     ImGui::Spacing(); ImGui::TextUnformatted("Map defaults");
-    ImGui::BeginChild("settings-map", {std::min(360 * uiScale,ImGui::GetContentRegionAvail().x),290 * uiScale});
+    ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding,{12 * uiScale,12 * uiScale});
+    ImGui::BeginChild("settings-map", {std::min(360 * uiScale,ImGui::GetContentRegionAvail().x),314 * uiScale},ImGuiChildFlags_AlwaysUseWindowPadding);
     mapAppearanceSettings(); ImGui::EndChild();
+    ImGui::PopStyleVar();
     if (ImGui::Button("Reset settings")) { preferences = UiPreferences{}; requestedWindowSize = {1040,760}; restoreWindow = true; }
     ImGui::TextDisabled("Window and map settings save automatically.");
 }
