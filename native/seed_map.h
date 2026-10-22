@@ -56,6 +56,29 @@ static void mapReceive(const std::string &dimension) {
     }
 }
 
+static void mapSection(const char *name) {
+    ImGui::Dummy({0,5 * uiScale});
+    ImGui::TextDisabled("%s",name);
+}
+
+static void mapMarker(ImDrawList *draw, ImVec2 position, float radius, const std::string &name, bool ship, bool selected) {
+    float r = std::max(6.0f * uiScale,radius);
+    ImU32 ink = IM_COL32(30,52,58,255), paper = ship ? IM_COL32(246,210,134,255) : IM_COL32(239,240,219,255);
+    if (selected) draw->AddCircle(position,r + 6 * uiScale,IM_COL32(220,246,238,255),24,2 * uiScale);
+    draw->AddCircleFilled({position.x,position.y + 2 * uiScale},r + 3 * uiScale,IM_COL32(15,30,34,80),20);
+    draw->AddCircleFilled(position,r + 2 * uiScale,ink,20);
+    draw->AddCircleFilled(position,r,paper,20);
+    if (name.find("village") != std::string::npos) {
+        draw->AddTriangleFilled({position.x - r * 0.65f,position.y},{position.x,position.y - r * 0.65f},{position.x + r * 0.65f,position.y},ink);
+        draw->AddRectFilled({position.x - r * 0.4f,position.y - r * 0.05f},{position.x + r * 0.4f,position.y + r * 0.55f},ink);
+    } else if (ship) {
+        draw->AddTriangleFilled({position.x - r * 0.75f,position.y - r * 0.35f},{position.x,position.y + r * 0.55f},{position.x - r * 0.1f,position.y - r * 0.5f},ink);
+        draw->AddTriangleFilled({position.x + r * 0.75f,position.y - r * 0.35f},{position.x,position.y + r * 0.55f},{position.x + r * 0.1f,position.y - r * 0.5f},ink);
+    } else {
+        draw->AddQuadFilled({position.x,position.y - r * 0.65f},{position.x + r * 0.5f,position.y},{position.x,position.y + r * 0.65f},{position.x - r * 0.5f,position.y},ink);
+    }
+}
+
 static void mapPanel(Json &command) {
     const char *dimensions[] = {"overworld", "the_nether", "the_end"};
     const char *dimensionNames[] = {"Overworld", "Nether", "End"};
@@ -94,10 +117,17 @@ static void mapPanel(Json &command) {
     float availableWidth = ImGui::GetContentRegionAvail().x;
     bool sideBySide = availableWidth >= 680 * uiScale;
     float sidebarWidth = std::clamp(preferences.sidebarWidth * uiScale,180 * uiScale,std::max(180 * uiScale,availableWidth - 340 * uiScale));
-    if (preferences.controls) ImGui::BeginChild("map-controls",{sideBySide ? sidebarWidth : 0,sideBySide ? 0 : std::min(280 * uiScale,ImGui::GetContentRegionAvail().y * 0.45f)},ImGuiChildFlags_None);
+    if (preferences.controls) {
+        ImGui::PushStyleColor(ImGuiCol_ChildBg,{0.065f,0.065f,0.072f,0.94f});
+        ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding,{12 * uiScale,12 * uiScale});
+        ImGui::BeginChild("map-controls",{sideBySide ? sidebarWidth : 0,sideBySide ? 0 : std::min(280 * uiScale,ImGui::GetContentRegionAvail().y * 0.45f)},ImGuiChildFlags_AlwaysUseWindowPadding);
+        ImGui::PopStyleVar();
+        ImGui::PopStyleColor();
+    }
     bool dimensionChanged = false;
     if (preferences.controls) {
-        ImGui::TextUnformatted("World");
+        ImGui::TextUnformatted("Explore");
+        mapSection("Dimension");
         ImGui::SetNextItemWidth(-1);
         dimensionChanged = ImGui::Combo("##map-dimension", &view.dimension, dimensionNames, 3);
     }
@@ -107,12 +137,12 @@ static void mapPanel(Json &command) {
         view.x = 0; view.z = 0; view.y = 64;
     }
     if (preferences.controls) {
-    ImGui::SetNextItemWidth(72 * uiScale);
+    mapSection("Biome height");
+    ImGui::SetNextItemWidth(64 * uiScale);
     bool heightChanged = ImGui::InputInt("Y##map", &view.y, 0, 0);
     view.y = std::clamp(view.y, -64, 320);
     if (heightChanged) { view.tiles.clear(); view.data = Json::object(); }
     if (ImGui::IsItemHovered()) ImGui::SetTooltip("Biome slice height. Try Y -40 for underground biomes.");
-    ImGui::SameLine();
     if (ImGui::SmallButton("Surface")) { view.y = 64; view.tiles.clear(); view.data = Json::object(); }
     ImGui::SameLine();
     if (ImGui::SmallButton("Caves")) { view.y = -40; view.tiles.clear(); view.data = Json::object(); }
@@ -122,7 +152,7 @@ static void mapPanel(Json &command) {
     ImGui::EndDisabled();
     }
     bool layerChanged = false;
-    if (preferences.controls) layerChanged = ImGui::Checkbox("Structures##map", &view.structures);
+    if (preferences.controls) { mapSection("Structure layer"); layerChanged = ImGui::Checkbox("Structures##map", &view.structures); }
     auto catalogs = state.value("catalogs", Json::object());
     auto catalog = catalogs.value(dimension, Json::object());
     auto targets = catalog.value("structures", std::vector<std::string>{});
@@ -146,6 +176,7 @@ static void mapPanel(Json &command) {
     const char *cityFilters[] = {"any", "with_elytra", "without_elytra"};
     std::string cityFilter = cityFilters[view.cityFilter];
     if (preferences.controls) {
+    mapSection("Go to coordinates");
     int center[2] = {static_cast<int>(std::round(view.x)), static_cast<int>(std::round(view.z))};
     ImGui::SetNextItemWidth(std::max(130.0f, ImGui::GetContentRegionAvail().x - 60 * uiScale));
     if (ImGui::InputInt2("X / Z##map", center, ImGuiInputTextFlags_EnterReturnsTrue)) { view.x = center[0]; view.z = center[1]; view.followPlayer = false; }
@@ -162,21 +193,28 @@ static void mapPanel(Json &command) {
         }
         if (view.areas.empty()) ImGui::TextDisabled("Visible biomes appear here.");
     }
-    ImGui::TextWrapped("Colors show biomes at the selected height. Close-up views retain the vanilla 4-block biome sampling grid.");
+    ImGui::Dummy({0,6 * uiScale});
+    ImGui::TextDisabled("About this map");
+    if (ImGui::IsItemHovered()) ImGui::SetTooltip("Colors show biomes at the selected height. Close-up views retain the vanilla 4-block biome sampling grid.");
     ImGui::EndChild();
     if (sideBySide) {
         ImGui::SameLine(0,4 * uiScale);
         ImGui::InvisibleButton("Resize map controls",{6 * uiScale,ImGui::GetContentRegionAvail().y});
-        if (ImGui::IsItemHovered() || ImGui::IsItemActive()) ImGui::SetMouseCursor(ImGuiMouseCursor_ResizeEW);
+        if (ImGui::IsItemHovered() || ImGui::IsItemActive()) {
+            ImGui::SetMouseCursor(ImGuiMouseCursor_ResizeEW);
+            auto a = ImGui::GetItemRectMin(), b = ImGui::GetItemRectMax();
+            ImGui::GetWindowDrawList()->AddRectFilled({a.x + 2 * uiScale,a.y},{b.x - 2 * uiScale,b.y},IM_COL32(145,145,155,160),uiScale);
+        }
         if (ImGui::IsItemActive()) preferences.sidebarWidth = std::clamp(preferences.sidebarWidth + ImGui::GetIO().MouseDelta.x / uiScale,180.0f,400.0f);
         ImGui::SameLine(0,4 * uiScale);
     }
     }
     ImGui::BeginChild("map-viewport",{0,0},ImGuiChildFlags_None,ImGuiWindowFlags_NoScrollWithMouse);
     if (view.followPlayer && state.value("connected",false) && state.value("dimension", "overworld") == dimension) { view.x = state.value("x",0); view.z = state.value("z",0); }
-    ImGui::TextDisabled("%.3g blocks / pixel   %s   Y %d",view.blocksPerPixel,dimensionNames[view.dimension],view.y);
+    ImGui::TextUnformatted(dimensionNames[view.dimension]);
+    ImGui::SameLine(); ImGui::TextDisabled("   Y %d   /   %.3g blocks per pixel",view.y,view.blocksPerPixel);
 
-    ImVec2 size{ImGui::GetContentRegionAvail().x, std::max(100 * uiScale, ImGui::GetContentRegionAvail().y - 88 * uiScale)};
+    ImVec2 size{ImGui::GetContentRegionAvail().x, std::max(100 * uiScale, ImGui::GetContentRegionAvail().y - 126 * uiScale)};
     ImVec2 start = ImGui::GetCursorScreenPos(), end{start.x + size.x, start.y + size.y}, middle{start.x + size.x / 2, start.y + size.y / 2};
     ImGui::InvisibleButton("Seed map canvas", size, ImGuiButtonFlags_MouseButtonLeft | ImGuiButtonFlags_MouseButtonRight);
     ImGui::SetItemKeyOwner(ImGuiKey_MouseWheelY);
@@ -256,7 +294,7 @@ static void mapPanel(Json &command) {
         if (spacing / view.blocksPerPixel >= 12 * uiScale) {
             for (double x = std::ceil(minX / spacing) * spacing; x <= maxX; x += spacing) {
                 float px = point(x,view.z).x;
-                draw->AddLine({px,start.y},{px,end.y},IM_COL32(235,243,247,45));
+                draw->AddLine({px,start.y},{px,end.y},IM_COL32(235,243,247,25));
                 if (spacing / view.blocksPerPixel >= 60 * uiScale || static_cast<int>(x) % 64 == 0) {
                     std::string coordinate = std::to_string(static_cast<int>(x));
                     draw->AddText({px + 4 * uiScale,start.y + 5 * uiScale},IM_COL32(246,248,241,210),coordinate.c_str());
@@ -264,7 +302,7 @@ static void mapPanel(Json &command) {
             }
             for (double z = std::ceil(minZ / spacing) * spacing; z <= maxZ; z += spacing) {
                 float py = point(view.x,z).y;
-                draw->AddLine({start.x,py},{end.x,py},IM_COL32(235,243,247,45));
+                draw->AddLine({start.x,py},{end.x,py},IM_COL32(235,243,247,25));
                 if (spacing / view.blocksPerPixel >= 60 * uiScale || static_cast<int>(z) % 64 == 0) {
                     std::string coordinate = std::to_string(static_cast<int>(z));
                     draw->AddText({start.x + 5 * uiScale,py + 3 * uiScale},IM_COL32(246,248,241,210),coordinate.c_str());
@@ -273,13 +311,14 @@ static void mapPanel(Json &command) {
         }
     }
     std::vector<ImVec4> occupied;
-    auto mapLabel = [&](const std::string &text, ImVec2 anchor, ImU32 color) {
+    auto mapLabel = [&](const std::string &text, ImVec2 anchor, ImU32 color, bool biomeLabel = false) {
         auto textSize = ImGui::CalcTextSize(text.c_str());
         ImVec4 box{anchor.x - textSize.x / 2 - 5 * uiScale,anchor.y,anchor.x + textSize.x / 2 + 5 * uiScale,anchor.y + textSize.y + 6 * uiScale};
         if (box.x < start.x + 8 * uiScale || box.y < start.y + 24 * uiScale || box.z > end.x - 8 * uiScale || box.w > end.y - 46 * uiScale) return;
         for (auto prior : occupied) if (box.x < prior.z + 8 * uiScale && box.z > prior.x - 8 * uiScale && box.y < prior.w + 8 * uiScale && box.w > prior.y - 8 * uiScale) return;
         occupied.push_back(box);
-        draw->AddRectFilled({box.x,box.y},{box.z,box.w},IM_COL32(29,39,47,200),4 * uiScale);
+        if (!biomeLabel) draw->AddRectFilled({box.x,box.y},{box.z,box.w},IM_COL32(15,15,18,235),5 * uiScale);
+        else draw->AddText({box.x + 6 * uiScale,box.y + 4 * uiScale},IM_COL32(20,36,37,230),text.c_str());
         draw->AddText({box.x + 5 * uiScale,box.y + 3 * uiScale},color,text.c_str());
     };
     const Json *hit = nullptr;
@@ -292,9 +331,8 @@ static void mapPanel(Json &command) {
         visibleMarkers++;
         bool ship = marker.contains("elytra") && !marker["elytra"].is_null();
         ImU32 color = ship ? IM_COL32(255,216,126,255) : IM_COL32(250,247,230,255);
-        draw->AddCircleFilled(pos, (preferences.markerSize + 2) * uiScale, IM_COL32(34,43,54,190), 16);
-        draw->AddCircleFilled(pos, preferences.markerSize * uiScale, color, 16);
-        if (ship) draw->AddCircleFilled(pos, 1.5f * uiScale, IM_COL32(139,91,37,255), 8);
+        bool selected = !view.selected.empty() && view.selected.value("x",0) == marker.value("x",0) && view.selected.value("z",0) == marker.value("z",0);
+        mapMarker(draw,pos,preferences.markerSize * uiScale,marker.value("name",""),ship,selected);
         if (preferences.structureLabels && view.blocksPerPixel <= 8) {
             std::string text = label(marker.value("name", ""));
             if (view.blocksPerPixel <= 1) text += "\n" + coordinatesOf(marker);
@@ -303,7 +341,7 @@ static void mapPanel(Json &command) {
         float distance = std::hypot(pos.x - io.MousePos.x, pos.y - io.MousePos.y);
         if (hovered && distance < closest) { closest = distance; hit = &marker; }
     }
-    if (preferences.biomeLabels) for (size_t i = 0; i < view.areas.size(); i++) if (view.areas[i] > 2600 * uiScale * uiScale && (view.highlight < 0 || view.highlight == static_cast<int>(i))) mapLabel(view.names[i],biomeAnchors[i],IM_COL32(231,241,222,235));
+    if (preferences.biomeLabels) for (size_t i = 0; i < view.areas.size(); i++) if (view.areas[i] > 2600 * uiScale * uiScale && (view.highlight < 0 || view.highlight == static_cast<int>(i))) mapLabel(view.names[i],biomeAnchors[i],IM_COL32(241,247,225,255),true);
     if (preferences.showPlayer && state.value("connected", false) && state.value("dimension", "overworld") == dimension) {
         ImVec2 player = point(state.value("x",0),state.value("z",0));
         draw->AddCircleFilled(player, 8 * uiScale, IM_COL32(38,63,81,230), 20);
@@ -326,11 +364,14 @@ static void mapPanel(Json &command) {
     double scaleBlocks = std::pow(2.0, std::floor(std::log2(90 * uiScale * view.blocksPerPixel)));
     float scaleWidth = static_cast<float>(scaleBlocks / view.blocksPerPixel);
     ImVec2 scalePos{start.x + 14 * uiScale, end.y - 14 * uiScale};
-    draw->AddRectFilled({scalePos.x - 7 * uiScale,scalePos.y - 29 * uiScale},{scalePos.x + std::max(scaleWidth,65 * uiScale) + 7 * uiScale,scalePos.y + 5 * uiScale},IM_COL32(30,39,50,225),4 * uiScale);
+    draw->AddRectFilled({scalePos.x - 7 * uiScale,scalePos.y - 29 * uiScale},{scalePos.x + std::max(scaleWidth,65 * uiScale) + 7 * uiScale,scalePos.y + 5 * uiScale},IM_COL32(15,15,18,225),4 * uiScale);
     std::string scaleLabel = std::to_string(static_cast<int>(scaleBlocks)) + " blocks";
     draw->AddText({scalePos.x,scalePos.y - 25 * uiScale},IM_COL32(232,238,244,255),scaleLabel.c_str());
     draw->AddLine(scalePos,{scalePos.x + scaleWidth,scalePos.y},IM_COL32(232,238,244,255),2 * uiScale);
-    draw->AddText({end.x - 25 * uiScale,start.y + 10 * uiScale},IM_COL32(250,250,242,255),"N");
+    ImVec2 compass{end.x - 26 * uiScale,start.y + 30 * uiScale};
+    draw->AddCircleFilled(compass,19 * uiScale,IM_COL32(15,15,18,225),24);
+    draw->AddText({compass.x - 5 * uiScale,compass.y - 15 * uiScale},IM_COL32(235,244,228,255),"N");
+    draw->AddTriangleFilled({compass.x,compass.y + 1 * uiScale},{compass.x - 5 * uiScale,compass.y + 11 * uiScale},{compass.x + 5 * uiScale,compass.y + 11 * uiScale},IM_COL32(220,220,228,255));
     draw->PopClipRect();
 
     if (hovered && ImGui::IsMouseReleased(ImGuiMouseButton_Right)) ImGui::OpenPopup("Map position");
@@ -346,11 +387,21 @@ static void mapPanel(Json &command) {
     }
 
     if (!view.selected.empty()) {
-        std::string text = label(view.selected.value("name", "")) + "  " + coordinatesOf(view.selected);
-        ImGui::SetNextItemWidth(-1);
+        ImGui::PushStyleColor(ImGuiCol_ChildBg,{0.045f,0.045f,0.052f,1});
+        ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding,{10 * uiScale,8 * uiScale});
+        ImGui::BeginChild("map-selection",{0,56 * uiScale},ImGuiChildFlags_AlwaysUseWindowPadding);
+        ImGui::PopStyleVar(); ImGui::PopStyleColor();
         if (ImGui::SmallButton("Copy##map-selection")) command = {{"action","copy"},{"text",coordinatesOf(view.selected)}};
-        ImGui::SameLine(); ImGui::TextUnformatted(text.c_str());
-    } else ImGui::TextDisabled("Drag to pan. Scroll to zoom. Click to select.");
+        ImGui::SameLine();
+        if (ImGui::SmallButton("Center##map-selection")) { view.x = view.selected.value("x",0); view.z = view.selected.value("z",0); view.followPlayer = false; }
+        ImGui::SameLine(); ImGui::TextUnformatted(label(view.selected.value("name", "")).c_str());
+        ImGui::TextDisabled("%s",coordinatesOf(view.selected).c_str());
+        ImGui::EndChild();
+    } else {
+        ImGui::Dummy({0,3 * uiScale});
+        ImGui::TextDisabled("Drag to pan. Scroll to zoom. Shift for finer zoom.");
+        ImGui::TextDisabled("Select a marker to inspect its location.");
+    }
     std::string mapError = view.data.value("error", "");
     if (!mapError.empty()) ImGui::TextWrapped("%s",mapError.c_str());
     else if (view.sentKey != desired || view.data.value("id", -1LL) != view.requestId) ImGui::TextDisabled("Loading map...");

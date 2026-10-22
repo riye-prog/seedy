@@ -23,7 +23,7 @@ public final class SeedyClient implements ClientModInitializer {
     private static boolean smokeOpened;
     public static boolean matchesToggle(KeyEvent event) { return toggle != null && toggle.matches(event); }
     public static boolean matchesToggle(MouseButtonEvent event) { return toggle != null && toggle.matchesMouse(event); }
-    public static void rescan() { COLLECTOR.rescan(); }
+    public static void rescan() { COLLECTOR.rescan(); BedrockRecovery.INSTANCE.rescan(); }
     public static int pendingChunks() { return COLLECTOR.pending(); }
     @Override public void onInitializeClient() {
         toggle = KeyMappingHelper.registerKeyMapping(new KeyMapping("key.seedy.toggle", InputConstants.KEY_F8, KeyMapping.Category.register(Identifier.fromNamespaceAndPath("seedy", "controls"))));
@@ -38,7 +38,11 @@ public final class SeedyClient implements ClientModInitializer {
         });
         ClientChunkEvents.CHUNK_LOAD.register((world, chunk) -> {
             LoadedObjects.loaded(world, chunk);
-            if (world.dimension().equals(net.minecraft.world.level.Level.OVERWORLD)) COLLECTOR.loaded(world, chunk.getPos(), Workbench.INSTANCE);
+            NetherBedrockRecovery.INSTANCE.loaded(world, chunk.getPos());
+            if (world.dimension().equals(net.minecraft.world.level.Level.OVERWORLD)) {
+                COLLECTOR.loaded(world, chunk.getPos(), Workbench.INSTANCE);
+                BedrockRecovery.INSTANCE.loaded(world, chunk.getPos());
+            }
         });
         ClientChunkEvents.CHUNK_UNLOAD.register((world, chunk) -> {
             LoadedObjects.unload(world, chunk.getPos());
@@ -52,19 +56,25 @@ public final class SeedyClient implements ClientModInitializer {
             }
             if (client.level != null) COLLECTOR.tick(client.level, Workbench.INSTANCE);
             Workbench.INSTANCE.tick(client);
+            BedrockRecovery.INSTANCE.tick(client);
+            NetherBedrockRecovery.INSTANCE.tick(client);
         });
         ClientPlayConnectionEvents.DISCONNECT.register((handler, client) -> {
             sessionHash = null;
             COLLECTOR.clear();
+            BedrockRecovery.INSTANCE.reset(null);
+            NetherBedrockRecovery.INSTANCE.reset(null);
             LoadedObjects.clear();
             Workbench.INSTANCE.session(null);
         });
-        ClientLifecycleEvents.CLIENT_STOPPING.register(client -> { Workbench.INSTANCE.close(); NativeGui.shutdown(); });
+        ClientLifecycleEvents.CLIENT_STOPPING.register(client -> { Workbench.INSTANCE.close(); BedrockRecovery.INSTANCE.close(); NetherBedrockRecovery.INSTANCE.close(); NativeGui.shutdown(); });
     }
     public static void beginSession(long hash, boolean login) {
         if (login || sessionHash == null || sessionHash != hash) {
             sessionHash = hash;
             COLLECTOR.clear();
+            BedrockRecovery.INSTANCE.reset(hash);
+            NetherBedrockRecovery.INSTANCE.reset(hash);
             LoadedObjects.clear();
             Workbench.INSTANCE.session(hash);
         }

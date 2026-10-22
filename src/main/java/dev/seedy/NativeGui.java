@@ -2,7 +2,6 @@ package dev.seedy;
 
 import net.minecraft.client.Minecraft;
 import net.minecraft.network.chat.Component;
-import java.nio.file.Files;
 import java.util.ArrayList;
 import java.util.Locale;
 import java.util.concurrent.ConcurrentLinkedQueue;
@@ -25,16 +24,10 @@ public final class NativeGui {
         String os = System.getProperty("os.name").toLowerCase(Locale.ROOT), arch = System.getProperty("os.arch");
         String target = os.contains("mac") ? "macos-universal/libseedy.dylib" : os.contains("win") && (arch.equals("amd64") || arch.equals("x86_64")) ? "windows-x86_64/seedy.dll" : null;
         if (target == null) throw new IllegalStateException("The native panel supports macOS and Windows x64.");
-        try (var input = NativeGui.class.getResourceAsStream("/natives/" + target)) {
-            if (input == null) throw new IllegalStateException("The native panel library is missing from this build.");
-            var directory = Files.createTempDirectory("seedy-overlay-");
-            var library = directory.resolve(target.substring(target.indexOf('/') + 1));
-            Files.copy(input, library);
-            directory.toFile().deleteOnExit();
-            library.toFile().deleteOnExit();
-            System.load(library.toAbsolutePath().toString());
-            loaded = true;
-        }
+        String platform = target.substring(0, target.indexOf('/'));
+        if (platform.equals("windows-x86_64")) for (String dependency : new String[]{"libgcc_s_seh-1.dll", "libwinpthread-1.dll", "libstdc++-6.dll"}) NativeLibraries.loadIfPresent(platform, dependency);
+        NativeLibraries.load(platform, target.substring(target.indexOf('/') + 1));
+        loaded = true;
     }
 
     public static boolean wantsFrame() {

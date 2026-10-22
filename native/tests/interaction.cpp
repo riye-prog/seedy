@@ -67,6 +67,18 @@ int main(int argc, char **argv) {
         tick(); tick();
         require(click("Pause collection").value("action", "") == "collect", "Collection button did not activate");
         require(click("Rescan").value("action", "") == "rescan", "Rescan button did not activate");
+        state["patternEvidenceChunks"] = 200;
+        state["patternRawBlocks"] = 44;
+        state["patternRawChunks"] = 21;
+        state["patternCanTry"] = true;
+        tick(); tick();
+        require(click("Try current data").value("action", "") == "tryBlockRecovery", "Block recovery button did not activate");
+        state["patternRunning"] = true;
+        state["patternPass"] = 1;
+        state["patternProgress"] = 0.25;
+        tick(); tick();
+        require(click("Stop block check").value("action", "") == "stopBlockRecovery", "Block recovery stop button did not activate");
+        state["patternRunning"] = false;
         click("Locate##nav");
         require(activeSection == 1, "Locate tab did not activate");
         ImGui::SetWindowSize(ImGui::FindWindowByName("Seedy"), {920,900});
@@ -104,12 +116,8 @@ int main(int argc, char **argv) {
         require(click("X##close").value("action", "") == "close", "Close button did not activate after dragging");
         click("World##nav");
         require(activeSection == 4, "World tab did not activate");
-        auto outlines = click("Buried treasure outlines");
-        require(outlines.value("action", "") == "outlines" && !outlines.value("treasure", true), "Treasure toggle did not activate");
-        outlines = click("Mob spawner outlines");
-        require(outlines.value("action", "") == "outlines" && !outlines.value("spawners", true), "Spawner toggle did not activate");
-        outlines = click("Matching loot chest outlines");
-        require(outlines.value("action", "") == "outlines" && !outlines.value("loot", true), "Loot toggle did not activate");
+        auto outlines = click("Matching loot chest outlines");
+        require(outlines.value("action", "") == "outlines" && !outlines.value("loot", true) && !outlines.contains("treasure") && !outlines.contains("spawners"), "Loot toggle did not activate alone");
         ImGui::SetWindowSize(window, {920, 900});
         ImGui::SetWindowPos(window, {20,20});
         state["lootItems"] = Json::array({"minecraft:enchanted_golden_apple", "minecraft:diamond"});
@@ -132,8 +140,12 @@ int main(int argc, char **argv) {
         state["chestDetails"] = state["results"][0];
         state["chestDetails"]["loot"]["chests"] = Json::array({{{"x",125},{"y",-47},{"z",243},{"wanted",true},{"warning",""},{"items",Json::array({{{"id","minecraft:enchanted_golden_apple"},{"count",3},{"details",""}}})}}});
         tick(); tick();
+        for (auto *child : context->Windows) if (std::string(child->Name).find("panel-content") != std::string::npos) ImGui::SetScrollY(child,child->ScrollMax.y);
+        tick(); tick();
         require(click("Copy chest").value("text", "") == "125 -47 243", "Chest coordinates were not copied");
         state["catalogs"] = {{"overworld",{{"structures",{"minecraft:ancient_cities"}},{"biomes",{"minecraft:plains"}}}}, {"the_nether",{{"structures",{"minecraft:nether_complexes"}},{"biomes",{"minecraft:warped_forest"}}}}, {"the_end",{{"structures",{"minecraft:end_cities"}},{"biomes",{"minecraft:end_highlands"}}}}};
+        for (auto *child : context->Windows) if (std::string(child->Name).find("panel-content") != std::string::npos) ImGui::SetScrollY(child,0);
+        tick(); tick();
         click("Dimension"); tick();
         require(click("End").value("action", "") == "cancelSearch", "Dimension change did not clear results");
         auto endSearch = click("Locate");
@@ -192,6 +204,8 @@ int main(int argc, char **argv) {
         mapView.selected = {{"name","minecraft:ancient_city"},{"x",12},{"y",-37},{"z",32}};
         tick(); tick();
         require(click("Copy##map-selection").value("text", "") == "12 -37 32", "Map selection coordinates were not copied");
+        click("Center##map-selection");
+        require(mapView.x == 12 && mapView.z == 32 && !mapView.followPlayer,"Selected map location did not center");
         click("##map-dimension"); tick(); click("End");
         require(mapView.dimension == 2 && mapView.tiles.empty(), "Changing map dimension retained stale tiles");
         click("##map-ships"); tick(); click("With elytra ship");
@@ -234,9 +248,9 @@ int main(int argc, char **argv) {
         io.AddMousePosEvent(splitter.x + 40,splitter.y);tick();io.AddMouseButtonEvent(0,false);tick();
         require(preferences.sidebarWidth == beforeSidebar + 40, "Map sidebar splitter did not resize");
         click("Display"); tick();
-        click("Detail##map"); tick(); click("Detailed");
+        click("##map-detail"); tick(); click("Detailed");
         require(preferences.detail == 2, "Map detail setting did not change");
-        click("Grid##map"); tick(); click("Chunk grid");
+        click("##map-grid"); tick(); click("Chunk grid");
         require(preferences.grid == 2, "Chunk grid setting did not change");
         auto preferencesAction = click("X##close");
         require(preferencesAction.contains("preferences") && preferencesAction["preferences"]["detail"] == 2 && preferencesAction["preferences"]["sidebarWidth"] == beforeSidebar + 40, "Closing did not save updated map settings");
@@ -247,10 +261,11 @@ int main(int argc, char **argv) {
         ImGui::NewFrame();
         drawOutlines({10,10,11,11,0,20,20,21,21,1,30,30,31,31,2});
         auto outlineDraw = ImGui::GetBackgroundDrawList();
-        require(!outlineDraw->VtxBuffer.empty(), "Outlines were not drawn");
+        require(!outlineDraw->VtxBuffer.empty(), "Loot chest outline was not drawn");
+        require(outlineDraw->VtxBuffer.size() < 16, "Spawner or treasure outlines were drawn");
         for (const auto &vertex : outlineDraw->VtxBuffer) {
             auto rgb = vertex.col & 0xffffff;
-            require(rgb == (IM_COL32(120,189,255,255) & 0xffffff) || rgb == (IM_COL32(255,206,102,255) & 0xffffff) || rgb == (IM_COL32(205,168,255,255) & 0xffffff), "Outline contains a dark backing stroke");
+            require(rgb == (IM_COL32(205,168,255,255) & 0xffffff), "A non-loot outline was drawn");
         }
         ImGui::Render();
         if (argc == 3) {
@@ -267,11 +282,21 @@ int main(int argc, char **argv) {
             ImGui::SetWindowSize(window,{1160,860}); ImGui::SetWindowPos(window,{30,30});
             io.AddMousePosEvent(1200,900);
             tick(); tick();
+            click("Display");
+            io.AddMousePosEvent(1200,900); tick();
             mapView.sentKey = mapView.desiredKey;
             auto startTime = std::chrono::steady_clock::now();
             for (int i = 0; i < 120; i++) tick();
             std::cout << "Map CPU frame ms: " << std::chrono::duration<double,std::milli>(std::chrono::steady_clock::now() - startTime).count() / 120 << " vertices: " << ImGui::GetDrawData()->TotalVtxCount << '\n';
             exportFrame(argv[2]);
+            if (preview.contains("markers") && !preview["markers"].empty()) mapView.selected = *std::min_element(preview["markers"].begin(),preview["markers"].end(),[](const Json &a,const Json &b) { return std::hypot(a.value("x",0),a.value("z",0)) < std::hypot(b.value("x",0),b.value("z",0)); });
+            tick(); tick(); exportFrame(std::string(argv[2]) + ".selection");
+            mapView.selected = Json::object();
+            ImGui::SetWindowSize(window,{720,560});
+            tick(); tick(); exportFrame(std::string(argv[2]) + ".compact");
+            click("Settings##nav"); tick();
+            require(activeSection == 6,"Compact navigation did not activate");
+            exportFrame(std::string(argv[2]) + ".settings");
         }
         ImGui::DestroyContext(context);
         std::cout << "Passed: collection, rescan, navigation, locate, saving locations, seed entry, copy, dragging, close, loot filters, chest details, outline colors\n";

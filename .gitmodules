@@ -1,0 +1,3 @@
+[submodule "vendor/bedrockseed"]
+	path = vendor/bedrockseed
+	url = https://github.com/someone12469/seed-cracking.git

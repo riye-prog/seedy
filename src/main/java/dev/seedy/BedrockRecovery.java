@@ -1,0 +1,371 @@
+package dev.seedy;
+
+import bedrock.generated.BedrockNative;
+import bedrock.generated.block_entry;
+import dev.seedy.recovery.SeedHash;
+import net.minecraft.client.Minecraft;
+import net.minecraft.client.multiplayer.ClientLevel;
+import net.minecraft.core.BlockPos;
+import net.minecraft.world.level.ChunkPos;
+import net.minecraft.world.level.Level;
+import net.minecraft.world.level.block.Block;
+import net.minecraft.world.level.block.Blocks;
+import net.minecraft.world.level.chunk.ChunkAccess;
+import java.io.IOException;
+import java.lang.foreign.Arena;
+import java.lang.foreign.MemorySegment;
+import java.util.ArrayDeque;
+import java.util.Arrays;
+import java.util.HashSet;
+import java.util.LinkedHashMap;
+import java.util.Locale;
+import java.util.Map;
+import java.util.Set;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+
+public final class BedrockRecovery implements AutoCloseable {
+    public static final BedrockRecovery INSTANCE = new BedrockRecovery();
+    private static final int MIN_EVIDENCE_CHUNKS = 128;
+    private static final int MIN_RAW_BLOCKS = 40;
+    private static final int MIN_RAW_CHUNKS = 20;
+    private static final long COORDINATE_MASK = (1L << 26) - 1;
+    private final ArrayDeque<ChunkPos> queue = new ArrayDeque<>();
+    private final Set<Long> queued = new HashSet<>();
+    private final Set<Long> scanned = new HashSet<>();
+    private final Map<Long, ChunkSample> samples = new LinkedHashMap<>();
+    private final ThreadLocal<String> nativeFailure = new ThreadLocal<>();
+    private final ExecutorService worker = Executors.newSingleThreadExecutor(task -> {
+        Thread thread = Thread.ofPlatform().daemon().name("seedy-bedrock-recovery").unstarted(task);
+        thread.setPriority(Thread.NORM_PRIORITY);
+        return thread;
+    });
+    private int observationCount;
+    private int rawCount;
+    private int oreCount;
+    private int evidenceChunks;
+    private int rawChunks;
+    private int ticks;
+    private int lastScanTick;
+    private int lastAttemptEvidenceChunks;
+    private int lastAttemptRawBlocks;
+    private int lastAttemptRawChunks;
+    private volatile int generation;
+    private volatile int runningGeneration = -1;
+    private boolean connected;
+    private boolean attempted;
+    private volatile boolean cancelRequested;
+    private volatile boolean running;
+    private volatile boolean found;
+    private volatile boolean nativeMatched;
+    private volatile Long expectedHash;
+    private volatile long attemptStartedAt;
+    private volatile long candidateStartedAt;
+    private volatile long checkedCandidates;
+    private volatile long totalCandidates;
+    private volatile int pass;
+    private volatile String status = "Waiting for a world";
+    private static boolean nativeLoaded;
+
+    private BedrockRecovery() { }
+
+    public void reset(Long hash) {
+        generation++;
+        expectedHash = hash;
+        connected = hash != null;
+        queue.clear();
+        queued.clear();
+        scanned.clear();
+        samples.clear();
+        observationCount = 0;
+        rawCount = 0;
+        oreCount = 0;
+        evidenceChunks = 0;
+        rawChunks = 0;
+        ticks = 0;
+        lastScanTick = 0;
+        lastAttemptEvidenceChunks = 0;
+        lastAttemptRawBlocks = 0;
+        lastAttemptRawChunks = 0;
+        attempted = false;
+        cancelRequested = true;
+        runningGeneration = -1;
+        attemptStartedAt = 0;
+        candidateStartedAt = 0;
+        checkedCandidates = 0;
+        totalCandidates = 0;
+        pass = 0;
+        found = false;
+        nativeMatched = false;
+        status = connected ? "Collecting loaded Overworld chunks" : "Waiting for a world";
+    }
+
+    public void loaded(ClientLevel world, ChunkPos position) {
+        if (connected && world.dimension().equals(Level.OVERWORLD)) schedule(position, true);
+    }
+
+    private void schedule(ChunkPos position) {
+        schedule(position, false);
+    }
+
+    private void schedule(ChunkPos position, boolean refresh) {
+        long key = position.pack();
+        if ((refresh || !scanned.contains(key)) && queued.add(key)) queue.add(position);
+    }
+
+    public void rescan() {
+        Minecraft client = Minecraft.getInstance();
+        if (!connected || client.level == null || client.player == null || !client.level.dimension().equals(Level.OVERWORLD)) return;
+        int cx = client.player.getBlockX() >> 4;
+        int cz = client.player.getBlockZ() >> 4;
+        int radius = Math.min(16, client.options.renderDistance().get());
+        for (int x = cx - radius; x <= cx + radius; x++) for (int z = cz - radius; z <= cz + radius; z++) {
+            if (client.level.hasChunk(x, z)) schedule(new ChunkPos(x, z), true);
+        }
+        status = "Rescanning loaded chunks";
+    }
+
+    public void tick(Minecraft client) {
+        if (!connected || found || client.level == null || !client.level.dimension().equals(Level.OVERWORLD)) return;
+        if (Workbench.INSTANCE.hasVerifiedSeed()) {
+            status = "Seed already verified";
+            return;
+        }
+        ticks++;
+        if (ticks % 20 == 1 && client.player != null) {
+            int cx = client.player.getBlockX() >> 4;
+            int cz = client.player.getBlockZ() >> 4;
+            int radius = Math.min(16, client.options.renderDistance().get());
+            for (int x = cx - radius; x <= cx + radius; x++) for (int z = cz - radius; z <= cz + radius; z++) {
+                if (client.level.hasChunk(x, z)) schedule(new ChunkPos(x, z));
+            }
+        }
+        long deadline = System.nanoTime() + 3_000_000;
+        while (!queue.isEmpty() && System.nanoTime() < deadline) {
+            ChunkPos position = queue.remove();
+            queued.remove(position.pack());
+            if (client.level.hasChunk(position.x(), position.z())) {
+                scan(client.level.getChunk(position.x(), position.z()));
+                lastScanTick = ticks;
+            }
+        }
+        if (attempted && !running && (evidenceChunks >= lastAttemptEvidenceChunks + 64 || rawCount >= lastAttemptRawBlocks + 12 && rawChunks >= lastAttemptRawChunks + 4)) attempted = false;
+        if (!running && !attempted && queue.isEmpty() && ticks - lastScanTick >= 100) {
+            if (Workbench.INSTANCE.structureRecoveryRunning()) status = "Checking detected structures first";
+            else if (evidenceChunks >= MIN_EVIDENCE_CHUNKS && rawCount >= MIN_RAW_BLOCKS && rawChunks >= MIN_RAW_CHUNKS) startSearch();
+            else if (scanned.size() >= 256) status = rawCount == 0 ? "No raw iron/copper blocks in loaded chunks" : "Collecting more ore evidence near spawn";
+        }
+    }
+
+    void scan(ChunkAccess chunk) {
+        long[] entries = new long[4096];
+        int count = 0;
+        int raw = 0;
+        int ore = 0;
+        int minX = chunk.getPos().getMinBlockX();
+        int minZ = chunk.getPos().getMinBlockZ();
+        BlockPos.MutableBlockPos position = new BlockPos.MutableBlockPos();
+        for (int dx = 0; dx < 16; dx++) for (int dz = 0; dz < 16; dz++) {
+            int x = minX + dx;
+            int z = minZ + dz;
+            for (int y = -63; y <= 50; y++) {
+                int type = classify(chunk.getBlockState(position.set(x, y, z)).getBlock(), y);
+                if (type < 0) continue;
+                if (count == entries.length) entries = Arrays.copyOf(entries, entries.length * 2);
+                entries[count++] = ((long)x & COORDINATE_MASK) << 38 | ((long)z & COORDINATE_MASK) << 12 | ((long)(y + 64) & 255) << 4 | type;
+                if (type == 1) raw++;
+                if (type == 2) ore++;
+            }
+        }
+        ChunkSample next = new ChunkSample(Arrays.copyOf(entries, count), raw, ore);
+        long key = chunk.getPos().pack();
+        ChunkSample previous = samples.put(key, next);
+        scanned.add(key);
+        observationCount += count - (previous == null ? 0 : previous.entries().length);
+        rawCount += raw - (previous == null ? 0 : previous.raw());
+        oreCount += ore - (previous == null ? 0 : previous.ore());
+        evidenceChunks += (count > 0 ? 1 : 0) - (previous != null && previous.entries().length > 0 ? 1 : 0);
+        rawChunks += (raw > 0 ? 1 : 0) - (previous != null && previous.raw() > 0 ? 1 : 0);
+        if (previous != null && !Arrays.equals(previous.entries(), next.entries())) attempted = false;
+        if (!running) status = "Scanning loaded chunks";
+    }
+
+    private static int classify(Block block, int y) {
+        if (block == Blocks.BEDROCK) return 0;
+        if (block == Blocks.RAW_IRON_BLOCK || block == Blocks.RAW_COPPER_BLOCK) return 1;
+        if (block == Blocks.DEEPSLATE_IRON_ORE || block == Blocks.COPPER_ORE) return 2;
+        if (block == Blocks.TUFF || block == Blocks.GRANITE) return 3;
+        if (y >= -63 && y <= -60 || y >= 1 && y <= 7) {
+            if (block == Blocks.DEEPSLATE) return 5;
+            if (y >= 1 && block == Blocks.STONE) return 4;
+        }
+        return -1;
+    }
+
+    private void startSearch() {
+        attempted = true;
+        lastAttemptEvidenceChunks = evidenceChunks;
+        lastAttemptRawBlocks = rawCount;
+        lastAttemptRawChunks = rawChunks;
+        running = true;
+        status = "Cracking from loaded blocks";
+        int runGeneration = generation;
+        runningGeneration = runGeneration;
+        cancelRequested = false;
+        attemptStartedAt = System.nanoTime();
+        candidateStartedAt = 0;
+        checkedCandidates = 0;
+        totalCandidates = 0;
+        pass = 1;
+        long[] entries = new long[observationCount];
+        int offset = 0;
+        for (ChunkSample sample : samples.values()) {
+            System.arraycopy(sample.entries(), 0, entries, offset, sample.entries().length);
+            offset += sample.entries().length;
+        }
+        worker.submit(() -> {
+            try {
+                nativeFailure.remove();
+                nativeMatched = false;
+                loadNative();
+                try (Arena arena = Arena.ofConfined()) {
+                    MemorySegment blocks = block_entry.allocateArray(entries.length, arena);
+                    for (int i = 0; i < entries.length; i++) {
+                        long packed = entries[i];
+                        MemorySegment entry = block_entry.asSlice(blocks, i);
+                        block_entry.x(entry, (int)(packed >> 38));
+                        block_entry.z(entry, (int)(packed << 26 >> 38));
+                        block_entry.y(entry, (int)(packed >> 4 & 255) - 64);
+                        block_entry.typ(entry, (int)(packed & 15));
+                    }
+                    BedrockNative.bedrockseed$crack(entries.length, blocks, 31);
+                    if (generation == runGeneration && !nativeMatched && !cancelRequested && !Workbench.INSTANCE.hasVerifiedSeed()) {
+                        nativeFailure.remove();
+                        status = "Checking uncertain ore patterns";
+                        candidateStartedAt = 0;
+                        checkedCandidates = 0;
+                        totalCandidates = 0;
+                        pass = 2;
+                        BedrockNative.bedrockseed$crack(entries.length, blocks, 63);
+                    }
+                }
+                if (generation == runGeneration && !found) {
+                    String failure = nativeFailure.get();
+                    if (Workbench.INSTANCE.hasVerifiedSeed()) status = "Seed verified from nearby structures";
+                    else if (cancelRequested) status = "Search stopped";
+                    else if (nativeMatched) status = "Seed found; verifying";
+                    else status = failure == null ? "No matching seed from loaded chunks" : failure;
+                }
+            } catch (Throwable error) {
+                if (generation == runGeneration) status = "Block-pattern search failed: " + error.getClass().getSimpleName();
+                org.slf4j.LoggerFactory.getLogger("Seedy").error("Block-pattern recovery failed", error);
+            } finally {
+                nativeFailure.remove();
+                running = false;
+                runningGeneration = -1;
+            }
+        });
+    }
+
+    public void tryCurrentData() {
+        if (!connected || expectedHash == null) throw new IllegalArgumentException("Join a world first.");
+        if (Workbench.INSTANCE.hasVerifiedSeed()) throw new IllegalArgumentException("The seed is already verified.");
+        if (running || !queue.isEmpty()) throw new IllegalArgumentException("Wait for loaded chunks to finish scanning.");
+        if (attempted) throw new IllegalArgumentException("The loaded block sample was already checked. Load more chunks first.");
+        if (evidenceChunks < 64 || rawCount == 0) throw new IllegalArgumentException("There is not enough nearby block data to check yet.");
+        startSearch();
+    }
+
+    public void stopSearch() {
+        cancelRequested = true;
+        status = "Stopping block search";
+    }
+
+    private static synchronized void loadNative() throws IOException {
+        if (nativeLoaded) return;
+        String os = System.getProperty("os.name").toLowerCase(Locale.ROOT);
+        String arch = System.getProperty("os.arch").toLowerCase(Locale.ROOT);
+        String platform = os.contains("mac") ? (arch.equals("aarch64") || arch.equals("arm64") ? "macos-arm64" : "macos-x86_64") : os.contains("win") && (arch.equals("amd64") || arch.equals("x86_64")) ? "windows-x86_64" : null;
+        if (platform == null) throw new IOException("This build supports macOS and Windows x64");
+        String z3Name = platform.startsWith("macos") ? "libz3.dylib" : "libz3.dll";
+        String solverName = platform.startsWith("macos") ? "libseedycrack.dylib" : "seedycrack.dll";
+        String[] dependencies = platform.startsWith("macos") ? new String[0] : new String[]{"libgcc_s_seh-1.dll", "libwinpthread-1.dll", "libstdc++-6.dll", "libgmp-10.dll", "libgomp-1.dll"};
+        for (String name : dependencies) NativeLibraries.loadIfPresent(platform, name);
+        NativeLibraries.load(platform, z3Name);
+        NativeLibraries.load(platform, solverName);
+        BedrockNative.bedrockseed$crack$address();
+        nativeLoaded = true;
+    }
+
+    public static void sendUpdate(String key, boolean logOnly, Object... values) {
+        if ("commands.bedrockcrack.searchProgress".equals(key)) {
+            if (values.length >= 2 && values[0] instanceof Number checked && values[1] instanceof Number total && shouldContinueSearch()) {
+                if (INSTANCE.candidateStartedAt == 0) INSTANCE.candidateStartedAt = System.nanoTime();
+                INSTANCE.checkedCandidates = checked.longValue();
+                INSTANCE.totalCandidates = total.longValue();
+            }
+            return;
+        }
+        if (!"commands.bedrockcrack.foundWorldSeed".equals(key)) {
+            if ("commands.bedrockcrack.Z3Unsat".equals(key)) INSTANCE.nativeFailure.set("Block patterns conflict; try more untouched chunks");
+            if ("commands.bedrockcrack.Z3Failed".equals(key)) INSTANCE.nativeFailure.set("Could not resolve block patterns from these chunks");
+            String phase = switch (key) {
+                case "commands.bedrockcrack.completedBitSearch1" -> "Bedrock pattern checked";
+                case "commands.bedrockcrack.completedBitSearch2" -> "Deepslate pattern checked";
+                case "commands.bedrockcrack.completedBitSearch3" -> "Ore vein pattern checked";
+                case "commands.bedrockcrack.completedBitSearch4" -> "Ore type pattern checked";
+                case "commands.bedrockcrack.completedBitSearch5" -> "Raw ore pattern checked";
+                case "commands.bedrockcrack.startingZ3Search" -> "Resolving world seed";
+                case "commands.bedrockcrack.crackedRandomStateRandom" -> "Checking world seed candidates";
+                default -> null;
+            };
+            if (phase != null) Minecraft.getInstance().execute(() -> {
+                if (shouldContinueSearch() && !INSTANCE.found) INSTANCE.status = phase;
+            });
+            return;
+        }
+        if (values.length == 0 || !(values[0] instanceof Number number)) return;
+        Minecraft.getInstance().execute(() -> {
+            if (shouldContinueSearch() && Workbench.INSTANCE.acceptBlockSeed(number.longValue())) {
+                INSTANCE.found = true;
+                INSTANCE.status = "Seed recovered from loaded blocks";
+            }
+        });
+    }
+
+    public static boolean matchesWorldSeed(long seed) {
+        if (!shouldContinueSearch()) return false;
+        Long expected = INSTANCE.expectedHash;
+        boolean matched = expected != null && SeedHash.hash(seed) == expected;
+        if (matched) INSTANCE.nativeMatched = true;
+        return matched;
+    }
+
+    public static boolean shouldContinueSearch() {
+        return INSTANCE.running && !INSTANCE.cancelRequested && INSTANCE.runningGeneration == INSTANCE.generation && !Workbench.INSTANCE.hasVerifiedSeed();
+    }
+
+    public int scannedChunks() { return scanned.size(); }
+    public int evidenceChunks() { return evidenceChunks; }
+    public int rawBlocks() { return rawCount; }
+    public int oreCandidates() { return oreCount; }
+    public int rawChunks() { return rawChunks; }
+    private record ChunkSample(long[] entries, int raw, int ore) { }
+    public double collectionProgress() { return Math.min(1, Math.min((double)evidenceChunks / MIN_EVIDENCE_CHUNKS, Math.min((double)rawCount / MIN_RAW_BLOCKS, (double)rawChunks / MIN_RAW_CHUNKS))); }
+    public boolean canTry() { return connected && !running && !attempted && queue.isEmpty() && evidenceChunks >= 64 && rawCount > 0 && !Workbench.INSTANCE.hasVerifiedSeed(); }
+    public boolean running() { return running; }
+    public int pass() { return pass; }
+    public String status() { return status; }
+    public double progress() { return totalCandidates == 0 ? -1 : Math.min(1, (double)checkedCandidates / totalCandidates); }
+    public long elapsedSeconds() { return running && attemptStartedAt != 0 ? (System.nanoTime() - attemptStartedAt) / 1_000_000_000L : 0; }
+    public long etaSeconds() {
+        long started = candidateStartedAt;
+        long checked = checkedCandidates;
+        long total = totalCandidates;
+        if (started == 0 || checked < total / 100 || total == 0) return -1;
+        long elapsed = System.nanoTime() - started;
+        if (elapsed < 3_000_000_000L) return -1;
+        return Math.max(0, (long)((double)elapsed / checked * (total - checked) / 1_000_000_000D));
+    }
+    @Override public void close() { cancelRequested = true; runningGeneration = -1; worker.shutdown(); }
+}

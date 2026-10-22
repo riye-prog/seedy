@@ -8,6 +8,8 @@ jobs:
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
+        with:
+          submodules: true
       - uses: actions/setup-java@v4
         with:
           distribution: temurin
@@ -26,11 +28,77 @@ jobs:
         with:
           name: native-${{ runner.os }}
           path: native/dist/
+  pattern-native:
+    strategy:
+      matrix:
+        include:
+          - os: macos-15
+            platform: macos-arm64
+          - os: macos-15-intel
+            platform: macos-x86_64
+          - os: windows-latest
+            platform: windows-x86_64
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: true
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '25'
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Install macOS solver dependencies
+        if: runner.os == 'macOS'
+        run: HOMEBREW_NO_AUTO_UPDATE=1 brew install gcc@15 z3
+      - name: Configure macOS solver
+        if: runner.os == 'macOS'
+        run: cmake -S native/bedrock -B native/bedrock/build -DCMAKE_BUILD_TYPE=Release -DCMAKE_CXX_COMPILER="$(brew --prefix gcc@15)/bin/g++-15" -DSEEDY_PLATFORM=${{ matrix.platform }} -DZ3_ROOT="$(brew --prefix z3)" -DJAVA_HOME="$JAVA_HOME"
+      - name: Build macOS solver
+        if: runner.os == 'macOS'
+        run: cmake --build native/bedrock/build --config Release --parallel 3
+      - name: Package macOS solver
+        if: runner.os == 'macOS'
+        run: sh native/bedrock/package-macos.sh ${{ matrix.platform }} "$(brew --prefix z3)"
+      - name: Build macOS Nether solver
+        if: runner.os == 'macOS'
+        run: |
+          cargo build --locked --release --manifest-path native/nether-bedrock/Cargo.toml
+          cp native/nether-bedrock/target/release/libseedynether.dylib native/dist/${{ matrix.platform }}/
+          install_name_tool -id @rpath/libseedynether.dylib native/dist/${{ matrix.platform }}/libseedynether.dylib
+          python3 native/nether-bedrock/verify.py native/dist/${{ matrix.platform }}/libseedynether.dylib
+      - uses: msys2/setup-msys2@v2
+        if: runner.os == 'Windows'
+        with:
+          msystem: MINGW64
+          install: mingw-w64-x86_64-gcc mingw-w64-x86_64-cmake mingw-w64-x86_64-z3 mingw-w64-x86_64-gmp mingw-w64-x86_64-libgomp
+      - name: Configure and build Windows solver
+        if: runner.os == 'Windows'
+        shell: msys2 {0}
+        run: |
+          cmake -S native/bedrock -B native/bedrock/build -G "MinGW Makefiles" -DCMAKE_BUILD_TYPE=Release -DCMAKE_CXX_COMPILER=/mingw64/bin/g++.exe -DSEEDY_PLATFORM=windows-x86_64 -DZ3_ROOT=/mingw64 -DJAVA_HOME="$(cygpath -u "$JAVA_HOME")"
+          cmake --build native/bedrock/build --config Release --parallel 4
+          cp /mingw64/bin/libz3.dll /mingw64/bin/libgmp-10.dll /mingw64/bin/libwinpthread-1.dll /mingw64/bin/libgcc_s_seh-1.dll /mingw64/bin/libstdc++-6.dll /mingw64/bin/libgomp-1.dll native/dist/windows-x86_64/
+      - name: Build Windows Nether solver
+        if: runner.os == 'Windows'
+        run: |
+          cargo build --locked --release --manifest-path native/nether-bedrock/Cargo.toml
+          Copy-Item native/nether-bedrock/target/release/seedynether.dll native/dist/windows-x86_64/
+          python native/nether-bedrock/verify.py native/dist/windows-x86_64/seedynether.dll
+      - uses: actions/upload-artifact@v4
+        with:
+          name: native-${{ matrix.platform }}
+          path: native/dist/
   mod:
-    needs: native
+    needs: [native, pattern-native]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          submodules: true
       - uses: actions/setup-java@v4
         with:
           distribution: temurin

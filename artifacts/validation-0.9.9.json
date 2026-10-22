@@ -1,0 +1,23 @@
+{
+  "version": "0.9.9",
+  "targets": {
+    "26.2": {
+      "tests": 39,
+      "failures": 0,
+      "jar": "seedy-0.9.9+26.2.jar",
+      "bytes": 50178442,
+      "sha256": "09e34ac41c456bef8187e5f1ae63b54b95baa67694b471c5d001b16d982f30d8"
+    },
+    "26.3": {
+      "tests": 39,
+      "failures": 0,
+      "jar": "seedy-0.9.9+26.3.jar",
+      "bytes": 50178909,
+      "sha256": "c3a6b5698b549deb38fc006b20aa3563c8903acf8c7832aca1f31ac4c34baf02"
+    }
+  },
+  "native_panel_interaction": "passed on macos",
+  "native_binaries_packaged": ["macos arm64", "macos x86_64", "windows x86_64"],
+  "windows_runtime": "not tested",
+  "live_seed_recovery_on_user_world": "not tested"
+}

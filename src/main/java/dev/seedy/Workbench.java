@@ -51,7 +51,7 @@ public final class Workbench implements AutoCloseable {
     private volatile String snapshot = "{}";
     private Long hash;
     private String seed;
-    private boolean verified;
+    private volatile boolean verified;
     private boolean connected;
     private boolean collecting = true;
     private long session;
@@ -81,6 +81,8 @@ public final class Workbench implements AutoCloseable {
     }
 
     public boolean collecting() { return collecting; }
+    public boolean hasVerifiedSeed() { return verified; }
+    public boolean structureRecoveryRunning() { return recovery.running(); }
     public String snapshot() { return snapshot; }
     public void refresh() { publish(Minecraft.getInstance()); }
     public void stopMap() { mapVisible = false; seedMap.stop(); }
@@ -158,6 +160,18 @@ public final class Workbench implements AutoCloseable {
         }));
     }
 
+    public boolean acceptBlockSeed(long value) {
+        if (hash == null || SeedHash.hash(value) != hash) return false;
+        seed = Long.toString(value);
+        verified = true;
+        dirty = true;
+        seedMap.reset();
+        recovery.cancel();
+        cancelSearch();
+        publish(Minecraft.getInstance());
+        return true;
+    }
+
     public void action(String message) {
         try {
             var body = JSON.fromJson(message, JsonObject.class);
@@ -168,8 +182,12 @@ public final class Workbench implements AutoCloseable {
                 case "preferences" -> { }
                 case "close" -> Minecraft.getInstance().gui.setScreen(null);
                 case "collect" -> { collecting = !collecting; if (collecting) SeedyClient.rescan(); }
-                case "outlines" -> { LoadedObjects.treasureEnabled = body.get("treasure").getAsBoolean(); LoadedObjects.spawnersEnabled = body.get("spawners").getAsBoolean(); if (body.has("loot")) LoadedObjects.lootEnabled = body.get("loot").getAsBoolean(); }
+                case "outlines" -> LoadedObjects.lootEnabled = body.get("loot").getAsBoolean();
                 case "rescan" -> { SeedyClient.rescan(); collecting = true; }
+                case "tryBlockRecovery" -> BedrockRecovery.INSTANCE.tryCurrentData();
+                case "stopBlockRecovery" -> BedrockRecovery.INSTANCE.stopSearch();
+                case "tryNetherRecovery" -> NetherBedrockRecovery.INSTANCE.tryCurrentData();
+                case "stopNetherRecovery" -> NetherBedrockRecovery.INSTANCE.stopSearch();
                 case "recover" -> startRecovery();
                 case "stopRecovery" -> { recovery.cancel(); attemptedRevision = revision; }
                 case "seed" -> {
@@ -308,8 +326,27 @@ public final class Workbench implements AutoCloseable {
         state.addProperty("error", error);
         state.addProperty("storageStatus", dirty && storageWritable ? "Unsaved changes" : storageStatus);
         state.addProperty("pendingChunks", SeedyClient.pendingChunks());
-        state.addProperty("treasureOutlines", LoadedObjects.treasureEnabled);
-        state.addProperty("spawnerOutlines", LoadedObjects.spawnersEnabled);
+        state.addProperty("patternStatus", BedrockRecovery.INSTANCE.status());
+        state.addProperty("patternChunks", BedrockRecovery.INSTANCE.scannedChunks());
+        state.addProperty("patternEvidenceChunks", BedrockRecovery.INSTANCE.evidenceChunks());
+        state.addProperty("patternRawBlocks", BedrockRecovery.INSTANCE.rawBlocks());
+        state.addProperty("patternOreCandidates", BedrockRecovery.INSTANCE.oreCandidates());
+        state.addProperty("patternRawChunks", BedrockRecovery.INSTANCE.rawChunks());
+        state.addProperty("patternCollectionProgress", BedrockRecovery.INSTANCE.collectionProgress());
+        state.addProperty("patternRunning", BedrockRecovery.INSTANCE.running());
+        state.addProperty("patternCanTry", BedrockRecovery.INSTANCE.canTry());
+        state.addProperty("patternPass", BedrockRecovery.INSTANCE.pass());
+        state.addProperty("patternProgress", BedrockRecovery.INSTANCE.progress());
+        state.addProperty("patternElapsedSeconds", BedrockRecovery.INSTANCE.elapsedSeconds());
+        state.addProperty("patternEtaSeconds", BedrockRecovery.INSTANCE.etaSeconds());
+        state.addProperty("netherPatternStatus", NetherBedrockRecovery.INSTANCE.status());
+        state.addProperty("netherPatternChunks", NetherBedrockRecovery.INSTANCE.scannedChunks());
+        state.addProperty("netherPatternFloor", NetherBedrockRecovery.INSTANCE.floorBlocks());
+        state.addProperty("netherPatternRoof", NetherBedrockRecovery.INSTANCE.roofBlocks());
+        state.addProperty("netherPatternRunning", NetherBedrockRecovery.INSTANCE.running());
+        state.addProperty("netherPatternCanTry", NetherBedrockRecovery.INSTANCE.canTry());
+        state.addProperty("netherPatternProgress", NetherBedrockRecovery.INSTANCE.progress());
+        state.addProperty("netherPatternElapsedSeconds", NetherBedrockRecovery.INSTANCE.elapsedSeconds());
         state.addProperty("lootOutlines", LoadedObjects.lootEnabled);
         state.add("loadedObjects", JSON.toJsonTree(LoadedObjects.snapshot()));
         state.add("lootItems", JSON.toJsonTree(LootCatalog.items()));

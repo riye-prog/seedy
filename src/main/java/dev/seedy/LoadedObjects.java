@@ -18,8 +18,6 @@ public final class LoadedObjects {
     private static final Map<ChunkPos, Map<BlockPos, ObjectPosition>> CHUNKS = new HashMap<>();
     private static volatile List<ObjectPosition> snapshot = List.of();
     private static ClientLevel level;
-    public static volatile boolean treasureEnabled = true;
-    public static volatile boolean spawnersEnabled = true;
     public static volatile boolean lootEnabled = true;
     private static Map<Long, List<ChestLoot.Chest>> wanted = Map.of();
 
@@ -43,7 +41,7 @@ public final class LoadedObjects {
     }
 
     public static List<ObjectPosition> snapshot() { return snapshot; }
-    public static boolean active() { return !snapshot.isEmpty() && (treasureEnabled || spawnersEnabled || lootEnabled); }
+    public static boolean active() { return lootEnabled && snapshot.stream().anyMatch(object -> object.kind().equals("Matching loot chest")); }
     public static void clear() { CHUNKS.clear(); snapshot = List.of(); level = null; }
     private static void publish() {
         snapshot = CHUNKS.values().stream().flatMap(entries -> entries.values().stream()).map(object -> wanted(object) ? new ObjectPosition("Matching loot chest", object.x(), object.y(), object.z()) : object).filter(object -> !object.kind().equals("Chest")).toList();

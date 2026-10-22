@@ -16,12 +16,10 @@ public final class OutlineProjection {
         var matrix = new Matrix4f(camera.projectionMatrix).mul(camera.viewRotationMatrix);
         var lines = new ArrayList<Double>();
         for (var object : LoadedObjects.snapshot()) {
-            boolean treasure = object.kind().equals("Buried treasure candidate");
-            boolean loot = object.kind().equals("Matching loot chest");
-            if (loot ? !LoadedObjects.lootEnabled : treasure ? !LoadedObjects.treasureEnabled : !LoadedObjects.spawnersEnabled) continue;
+            if (!object.kind().equals("Matching loot chest")) continue;
             double x = object.x() - camera.pos.x, y = object.y() - camera.pos.y, z = object.z() - camera.pos.z;
             if (x * x + y * y + z * z > 512 * 512) continue;
-            box(matrix, x, y, z, width, height, loot ? 2 : treasure ? 1 : 0, lines);
+            box(matrix, x, y, z, width, height, 2, lines);
         }
         return lines.stream().mapToDouble(Double::doubleValue).toArray();
     }

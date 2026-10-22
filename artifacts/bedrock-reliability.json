@@ -1,0 +1,86 @@
+{
+  "platform": "macos-arm64",
+  "version": "26.2 and 26.3",
+  "solverRevision": "b1fc84ff7191a107673863a4c3b89f00a807226e",
+  "input": "full chunks extracted from local saved worlds",
+  "samples": [
+    {
+      "minecraft": "26.3",
+      "seed": "-8353848068969479759",
+      "chunks": 1089,
+      "rawOreBlocks": 328,
+      "result": "exact seed recovered",
+      "seconds": 101.404
+    },
+    {
+      "minecraft": "26.3",
+      "seed": "-8353848068969479759",
+      "chunks": 289,
+      "rawOreBlocks": 83,
+      "result": "exact seed recovered",
+      "seconds": 73.1961
+    },
+    {
+      "minecraft": "26.3",
+      "seed": "-8353848068969479759",
+      "chunks": 289,
+      "rawOreBlocks": 83,
+      "variant": "0.9.5 fast mode",
+      "result": "exact seed recovered",
+      "seconds": 82.2545
+    },
+    {
+      "minecraft": "26.2",
+      "seed": "2589511696370800371",
+      "chunks": 280,
+      "rawOreBlocks": 5,
+      "result": "z3 constraints contradictory",
+      "seconds": 11.9492
+    },
+    {
+      "minecraft": "26.2",
+      "seed": "2589511696370800371",
+      "chunks": 280,
+      "rawOreBlocks": 5,
+      "variant": "0.9.5 cautious retry",
+      "result": "z3 constraints contradictory",
+      "seconds": 30.2175,
+      "diagnostic": "the sparse sample still discarded the true vein and raw-ore patterns"
+    },
+    {
+      "minecraft": "26.2",
+      "seed": "2589511696370800371",
+      "chunks": 924,
+      "rawOreBlocks": 49,
+      "result": "z3 constraints contradictory",
+      "seconds": 71.4924,
+      "diagnostic": "the true ore-versus-filler pattern was absent with both 1000 and 10000 retained candidates"
+    },
+    {
+      "minecraft": "26.2",
+      "seed": "2589511696370800371",
+      "chunks": 924,
+      "rawOreBlocks": 49,
+      "variant": "0.9.5 cautious retry",
+      "result": "exact seed recovered",
+      "seconds": 477.491,
+      "diagnostic": "all five evidence stages retained the true state; final scan found the hash-matching world seed"
+    },
+    {
+      "minecraft": "26.2",
+      "seed": "2589511696370800371",
+      "chunks": 924,
+      "rawOreBlocks": 49,
+      "result": "first 64 models still missed the true state when the ore-versus-filler stage was omitted",
+      "seconds": 242.06
+    },
+    {
+      "minecraft": "26.2",
+      "seed": "7525956768771615108",
+      "chunks": 1089,
+      "rawOreBlocks": 144,
+      "result": "correct random state resolved; final seed search not completed"
+    }
+  ],
+  "build": "0.9.5 gradle :26.2:build :26.3:build passed"
+}

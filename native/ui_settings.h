@@ -45,11 +45,11 @@ static void toggleMaximized() { preferences.maximized = !preferences.maximized; 
 static void mapAppearanceSettings() {
     const char *details[] = {"Fast", "Balanced", "Detailed"};
     ImGui::SetNextItemWidth(-1);
-    ImGui::Combo("Detail##map", &preferences.detail, details, 3);
+    ImGui::Combo("##map-detail", &preferences.detail, details, 3);
     if (ImGui::IsItemHovered()) ImGui::SetTooltip("Detailed samples more densely. Resolution also adapts to the visible area.");
     const char *grids[] = {"No grid", "Coordinate grid", "Chunk grid"};
     ImGui::SetNextItemWidth(-1);
-    ImGui::Combo("Grid##map", &preferences.grid, grids, 3);
+    ImGui::Combo("##map-grid", &preferences.grid, grids, 3);
     ImGui::Checkbox("Biome names", &preferences.biomeLabels);
     ImGui::Checkbox("Structure names", &preferences.structureLabels);
     ImGui::Checkbox("Player marker", &preferences.showPlayer);
@@ -60,6 +60,7 @@ static void mapAppearanceSettings() {
 }
 
 static void settingsPanel() {
+    sectionHeading("Settings", "Your window and map preferences save automatically.");
     ImGui::TextUnformatted("Window");
     ImGui::TextWrapped("Resize from any edge or corner. Drag the header to move the window, or double-click it to maximize and restore.");
     if (ImGui::Button("Compact")) { preferences.maximized = false; requestedWindowSize = {720,560}; }

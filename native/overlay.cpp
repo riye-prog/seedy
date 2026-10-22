@@ -21,6 +21,7 @@ static std::string clipboard;
 static Json state = Json::object();
 static std::string previousState;
 static float uiScale = 1;
+static ImFont *headingFont = nullptr;
 static int activeSection = 0;
 static auto previousFrame = std::chrono::steady_clock::now();
 
@@ -40,6 +41,11 @@ static std::string label(std::string value) {
     return value;
 }
 
+static std::string timeLabel(long seconds) {
+    if (seconds < 60) return std::to_string(seconds) + "s";
+    return std::to_string(seconds / 60) + "m " + std::to_string(seconds % 60) + "s";
+}
+
 static void configureAppearance(float scale) {
     uiScale = std::clamp(scale, 1.0f, 2.5f);
     auto &io = ImGui::GetIO();
@@ -52,16 +58,17 @@ static void configureAppearance(float scale) {
     ImFontConfig fontConfig;
     fontConfig.FontDataOwnedByAtlas = false;
     io.Fonts->AddFontFromMemoryTTF(const_cast<unsigned char *>(font_data), sizeof(font_data), 15 * uiScale, &fontConfig);
+    headingFont = io.Fonts->AddFontFromMemoryTTF(const_cast<unsigned char *>(font_data), sizeof(font_data), 22 * uiScale, &fontConfig);
     ImGui::StyleColorsDark();
     auto &style = ImGui::GetStyle();
     style.WindowRounding = 12;
-    style.FrameRounding = 5;
-    style.ChildRounding = 6;
+    style.FrameRounding = 7;
+    style.ChildRounding = 10;
     style.TabRounding = 5;
-    style.WindowPadding = {18, 15};
+    style.WindowPadding = {20, 18};
     style.FramePadding = {9, 6};
     style.ItemSpacing = {9, 9};
-    style.CellPadding = {8, 5};
+    style.CellPadding = {10, 8};
     style.WindowBorderSize = 0;
     style.ChildBorderSize = 0;
     style.FrameBorderSize = 0;
@@ -71,25 +78,35 @@ static void configureAppearance(float scale) {
     style.ScrollbarSize = 10;
     io.ConfigWindowsMoveFromTitleBarOnly = true;
     io.ConfigWindowsResizeFromEdges = true;
-    style.Colors[ImGuiCol_WindowBg] = {0.105f,0.12f,0.145f,1};
-    style.Colors[ImGuiCol_ChildBg] = {0.085f,0.10f,0.12f,1};
-    style.Colors[ImGuiCol_PopupBg] = {0.15f,0.17f,0.20f,1};
-    style.Colors[ImGuiCol_FrameBg] = {0.17f,0.19f,0.225f,1};
-    style.Colors[ImGuiCol_FrameBgHovered] = {0.22f,0.25f,0.29f,1};
-    style.Colors[ImGuiCol_FrameBgActive] = {0.26f,0.30f,0.36f,1};
-    style.Colors[ImGuiCol_Button] = {0.20f,0.235f,0.28f,1};
-    style.Colors[ImGuiCol_ButtonHovered] = {0.28f,0.34f,0.42f,1};
-    style.Colors[ImGuiCol_ButtonActive] = {0.32f,0.40f,0.51f,1};
-    style.Colors[ImGuiCol_Header] = {0.16f,0.19f,0.23f,1};
-    style.Colors[ImGuiCol_HeaderHovered] = {0.27f,0.34f,0.43f,1};
-    style.Colors[ImGuiCol_HeaderActive] = {0.30f,0.38f,0.48f,1};
-    style.Colors[ImGuiCol_CheckMark] = {0.63f,0.76f,0.94f,1};
-    style.Colors[ImGuiCol_SliderGrab] = {0.50f,0.64f,0.82f,1};
-    style.Colors[ImGuiCol_SliderGrabActive] = {0.68f,0.80f,0.96f,1};
-    style.Colors[ImGuiCol_TableHeaderBg] = {0.12f,0.14f,0.17f,1};
-    style.Colors[ImGuiCol_TableRowBgAlt] = {1,1,1,0.025f};
-    style.Colors[ImGuiCol_Text] = {0.92f,0.94f,0.97f,1};
-    style.Colors[ImGuiCol_TextDisabled] = {0.64f,0.69f,0.76f,1};
+    style.Colors[ImGuiCol_WindowBg] = {0.102f,0.102f,0.110f,1.000f};
+    style.Colors[ImGuiCol_ChildBg] = {0.068f,0.068f,0.075f,1.000f};
+    style.Colors[ImGuiCol_PopupBg] = {0.095f,0.095f,0.105f,1.000f};
+    style.Colors[ImGuiCol_FrameBg] = {0.055f,0.055f,0.062f,1.000f};
+    style.Colors[ImGuiCol_FrameBgHovered] = {0.160f,0.160f,0.175f,1.000f};
+    style.Colors[ImGuiCol_FrameBgActive] = {0.200f,0.200f,0.215f,1.000f};
+    style.Colors[ImGuiCol_Button] = {0.035f,0.035f,0.042f,1.000f};
+    style.Colors[ImGuiCol_ButtonHovered] = {0.145f,0.145f,0.160f,1.000f};
+    style.Colors[ImGuiCol_ButtonActive] = {0.015f,0.015f,0.020f,1.000f};
+    style.Colors[ImGuiCol_Header] = {0.040f,0.040f,0.047f,1.000f};
+    style.Colors[ImGuiCol_HeaderHovered] = {0.160f,0.160f,0.175f,1.000f};
+    style.Colors[ImGuiCol_HeaderActive] = {0.025f,0.025f,0.030f,1.000f};
+    style.Colors[ImGuiCol_CheckMark] = {0.840f,0.840f,0.860f,1.000f};
+    style.Colors[ImGuiCol_SliderGrab] = {0.460f,0.460f,0.490f,1.000f};
+    style.Colors[ImGuiCol_SliderGrabActive] = {0.780f,0.780f,0.800f,1.000f};
+    style.Colors[ImGuiCol_TableHeaderBg] = {0.035f,0.035f,0.042f,1.000f};
+    style.Colors[ImGuiCol_TableRowBgAlt] = {1.000f,1.000f,1.000f,0.025f};
+    style.Colors[ImGuiCol_Text] = {0.930f,0.930f,0.940f,1.000f};
+    style.Colors[ImGuiCol_TextDisabled] = {0.640f,0.640f,0.680f,1.000f};
+    style.Colors[ImGuiCol_Separator] = {0.400f,0.400f,0.440f,0.300f};
+    style.Colors[ImGuiCol_ScrollbarBg] = {0.000f,0.000f,0.000f,0.000f};
+    style.Colors[ImGuiCol_ScrollbarGrab] = {0.400f,0.400f,0.440f,0.550f};
+    style.Colors[ImGuiCol_ScrollbarGrabHovered] = {0.550f,0.550f,0.600f,0.800f};
+    style.Colors[ImGuiCol_ScrollbarGrabActive] = {0.650f,0.650f,0.700f,1.000f};
+    style.Colors[ImGuiCol_ResizeGrip] = {0.600f,0.600f,0.650f,0.180f};
+    style.Colors[ImGuiCol_ResizeGripHovered] = {0.600f,0.600f,0.650f,0.600f};
+    style.Colors[ImGuiCol_ResizeGripActive] = {0.600f,0.600f,0.650f,1.000f};
+    style.Colors[ImGuiCol_NavHighlight] = {0.780f,0.780f,0.830f,1.000f};
+    style.Colors[ImGuiCol_TextSelectedBg] = {0.480f,0.480f,0.540f,0.450f};
     style.ScaleAllSizes(uiScale);
 }
 
@@ -141,7 +158,16 @@ static std::string select(const char *name, const char *key, int &selected) {
     return selectValues(name, state.value(key, std::vector<std::string>{}), selected);
 }
 
+static void sectionHeading(const char *title, const char *description = nullptr) {
+    auto position = ImGui::GetCursorScreenPos();
+    ImGui::GetWindowDrawList()->AddText(headingFont,22 * uiScale,position,ImGui::GetColorU32(ImGuiCol_Text),title);
+    ImGui::Dummy({0,28 * uiScale});
+    if (description) { ImGui::PushStyleColor(ImGuiCol_Text,ImGui::GetStyleColorVec4(ImGuiCol_TextDisabled)); ImGui::TextWrapped("%s",description); ImGui::PopStyleColor(); }
+    ImGui::Dummy({0,5 * uiScale});
+}
+
 static void recoveryPanel(Json &command) {
+    sectionHeading("Seed recovery", "Nearby blocks and structure observations can recover the world seed.");
     bool running = state.value("recovering", false);
     auto observations = state.value("observations", Json::array());
     if (!state.value("connected", false)) ImGui::TextDisabled("Join a world to collect observations.");
@@ -155,6 +181,53 @@ static void recoveryPanel(Json &command) {
     if (ImGui::Button("Rescan")) command = {{"action", "rescan"}};
     ImGui::EndDisabled();
     if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled)) ImGui::SetTooltip("Check loaded chunks again, including structures that loaded in pieces.");
+    ImGui::Spacing();
+    ImGui::TextUnformatted("Loaded block patterns");
+    ImGui::SameLine();
+    ImGui::TextDisabled("%d chunks  ·  %d raw iron/copper blocks in %d chunks  ·  %d ore candidates", state.value("patternChunks", 0), state.value("patternRawBlocks", 0), state.value("patternRawChunks", 0), state.value("patternOreCandidates", 0));
+    if (state.value("patternRunning", false)) ImGui::TextDisabled("Pass %d", state.value("patternPass", 1));
+    ImGui::TextWrapped("%s", state.value("patternStatus", "Waiting for a world").c_str());
+    bool blockRunning = state.value("patternRunning", false);
+    double blockProgress = state.value("patternProgress", -1.0);
+    if (state.value("connected", false) && !state.value("verified", false) && !blockRunning) {
+        double collection = state.value("patternCollectionProgress", 0.0);
+        ImGui::TextDisabled("Nearby evidence  %.0f%%", collection * 100);
+        ImGui::ProgressBar(static_cast<float>(collection), {-1, 7 * uiScale}, "");
+    }
+    if (blockRunning && blockProgress >= 0) {
+        ImGui::TextDisabled("Seed candidates  %.1f%%", blockProgress * 100);
+        ImGui::ProgressBar(static_cast<float>(blockProgress), {-1, 7 * uiScale}, "");
+    }
+    if (blockRunning) {
+        long elapsed = state.value("patternElapsedSeconds", 0L);
+        long eta = state.value("patternEtaSeconds", -1L);
+        if (eta >= 0) ImGui::TextDisabled("%s elapsed  ·  about %s left", timeLabel(elapsed).c_str(), timeLabel(eta).c_str());
+        else ImGui::TextDisabled("%s elapsed", timeLabel(elapsed).c_str());
+    }
+    ImGui::BeginDisabled(!state.value("patternCanTry", false));
+    if (ImGui::Button("Try current data")) command = {{"action", "tryBlockRecovery"}};
+    ImGui::EndDisabled();
+    if (blockRunning) {
+        ImGui::SameLine();
+        if (ImGui::Button("Stop block check")) command = {{"action", "stopBlockRecovery"}};
+    }
+    ImGui::Spacing();
+    ImGui::TextUnformatted("Nether bedrock");
+    ImGui::SameLine();
+    ImGui::TextDisabled("%d chunks  ·  %d floor  ·  %d roof", state.value("netherPatternChunks", 0), state.value("netherPatternFloor", 0), state.value("netherPatternRoof", 0));
+    ImGui::TextWrapped("%s", state.value("netherPatternStatus", "Enter the Nether to scan bedrock").c_str());
+    bool netherRunning = state.value("netherPatternRunning", false);
+    double netherProgress = state.value("netherPatternProgress", -1.0);
+    if (netherRunning) {
+        ImGui::TextDisabled("%s elapsed", timeLabel(state.value("netherPatternElapsedSeconds", 0L)).c_str());
+        if (netherProgress >= 0) ImGui::ProgressBar(static_cast<float>(netherProgress), {-1, 7 * uiScale}, "");
+        if (ImGui::Button("Stop Nether check")) command = {{"action", "stopNetherRecovery"}};
+    } else {
+        ImGui::BeginDisabled(!state.value("netherPatternCanTry", false));
+        if (ImGui::Button("Check Nether data")) command = {{"action", "tryNetherRecovery"}};
+        ImGui::EndDisabled();
+    }
+    ImGui::Spacing();
     ImGui::TextDisabled("%zu observations    %.1f evidence bits", observations.size(), state.value("evidence", 0.0));
     int pending = state.value("pendingChunks", 0);
     if (pending > 0) { ImGui::SameLine(); ImGui::TextDisabled("%d chunks queued", pending); }
@@ -247,6 +320,7 @@ static void chestDetails(const Json &entry, Json &command) {
 }
 
 static void locatePanel(Json &command) {
+    sectionHeading("Find a location", "Search structures, biomes and chest loot in any dimension.");
     static int kind = 0, target = 0, origin[3] = {0,64,0}, radius = 2048, dimensionIndex = 0, cityFilter = 0;
     const char *dimensions[] = {"overworld", "the_nether", "the_end"};
     const char *dimensionNames[] = {"Overworld", "Nether", "End"};
@@ -374,8 +448,8 @@ static void locatePanel(Json &command) {
 }
 
 static void savedPanel(Json &command) {
+    sectionHeading("Saved locations", "Places you want to return to.");
     auto locations = state.value("savedLocations", Json::array());
-    ImGui::TextUnformatted("Saved locations");
     ImGui::TextDisabled("%zu saved for the current seed", locations.size());
     if (locations.empty()) ImGui::TextWrapped("Save a search result to keep its coordinates here. Locations and observations are restored when you return to this world.");
     for (auto &entry : locations) {
@@ -404,8 +478,9 @@ static void savedPanel(Json &command) {
 static void drawOutlines(const std::vector<double> &lines) {
     auto draw = ImGui::GetBackgroundDrawList();
     for (int i = 0; i + 4 < static_cast<int>(lines.size()); i += 5) {
+        if (lines[i+4] != 2) continue;
         ImVec2 a{static_cast<float>(lines[i]),static_cast<float>(lines[i+1])}, b{static_cast<float>(lines[i+2]),static_cast<float>(lines[i+3])};
-        draw->AddLine(a, b, lines[i+4] == 2 ? IM_COL32(205,168,255,255) : lines[i+4] == 1 ? IM_COL32(255,206,102,255) : IM_COL32(120,189,255,255), 1.5f * uiScale);
+        draw->AddLine(a, b, IM_COL32(205,168,255,255), 1.5f * uiScale);
     }
 }
 
@@ -432,6 +507,16 @@ static Json drawPanel(int width, int height) {
         ImVec2 visiblePosition = {std::clamp(position.x, 0.0f, std::max(0.0f, width - size.x)),std::clamp(position.y, 0.0f, std::max(0.0f, height - size.y))};
         if (position.x != visiblePosition.x || position.y != visiblePosition.y) ImGui::SetWindowPos(visiblePosition);
         if (!preferences.maximized) { preferences.width = size.x / uiScale; preferences.height = size.y / uiScale; preferences.x = visiblePosition.x / uiScale; preferences.y = visiblePosition.y / uiScale; }
+        auto gridDraw = ImGui::GetWindowDrawList();
+        auto gridOrigin = ImGui::GetWindowPos();
+        ImVec2 gridEnd{gridOrigin.x + size.x - 12 * uiScale,gridOrigin.y + size.y - 12 * uiScale};
+        ImVec2 gridStart{gridOrigin.x + 12 * uiScale,gridOrigin.y + 12 * uiScale};
+        float gridSpacing = 32 * uiScale;
+        ImU32 gridColor = IM_COL32(255,255,255,static_cast<int>(7 * preferences.opacity));
+        gridDraw->PushClipRect(gridStart,gridEnd,true);
+        for (float x = gridOrigin.x + gridSpacing; x < gridEnd.x; x += gridSpacing) gridDraw->AddLine({x,gridStart.y},{x,gridEnd.y},gridColor);
+        for (float y = gridOrigin.y + gridSpacing; y < gridEnd.y; y += gridSpacing) gridDraw->AddLine({gridStart.x,y},{gridEnd.x,y},gridColor);
+        gridDraw->PopClipRect();
         ImVec2 header = ImGui::GetCursorScreenPos();
         float headerWidth = ImGui::GetContentRegionAvail().x - 136 * uiScale;
         ImGui::InvisibleButton("Move panel", {headerWidth,32 * uiScale});
@@ -444,9 +529,9 @@ static Json drawPanel(int width, int height) {
         }
         if (ImGui::IsItemHovered()) ImGui::SetMouseCursor(ImGuiMouseCursor_ResizeAll);
         auto draw = ImGui::GetWindowDrawList();
-        draw->AddText(nullptr, 20 * uiScale, {header.x,header.y + 3 * uiScale}, IM_COL32(235,240,248,255), "Seedy");
-        std::string subtitle = state.value("connected", false) ? label(state.value("dimension", "overworld")) + "  /  " + state.value("gameVersion", "") : "No world connected";
-        draw->AddText({header.x + 76 * uiScale,header.y + 7 * uiScale}, IM_COL32(164,177,194,255), subtitle.c_str());
+        draw->AddText(headingFont, 22 * uiScale, {header.x,header.y + 3 * uiScale}, IM_COL32(240,240,243,255), "Seedy");
+        std::string subtitle = state.value("connected", false) ? label(state.value("dimension", "overworld")) + "   " + state.value("gameVersion", "") : "No world connected";
+        draw->AddText({header.x + 79 * uiScale,header.y + 7 * uiScale}, IM_COL32(168,168,180,255), subtitle.c_str());
         ImGui::SameLine();
         if (ImGui::Button(preferences.maximized ? "Restore##window" : "Expand##window", {84 * uiScale,30 * uiScale})) toggleMaximized();
         ImGui::SameLine();
@@ -454,14 +539,21 @@ static Json drawPanel(int width, int height) {
         const char *sections[] = {"Recovery##nav", "Locate##nav", "Seed##nav", "Saved##nav", "World##nav", "Map##nav", "Settings##nav"};
         int columns = ImGui::GetContentRegionAvail().x < 620 * uiScale ? 4 : 7;
         float navWidth = (ImGui::GetContentRegionAvail().x - (columns - 1) * ImGui::GetStyle().ItemSpacing.x) / columns;
-        for (int i = 0; i < 7; i++) {
-            if (i % columns) ImGui::SameLine();
-            ImGui::PushStyleColor(ImGuiCol_Button, i == activeSection ? ImVec4{0.29f,0.37f,0.48f,1} : ImVec4{0.15f,0.17f,0.20f,1});
-            if (ImGui::Button(sections[i], {navWidth,31 * uiScale})) {
+        const int navigationOrder[] = {5,1,0,2,3,4,6};
+        for (int slot = 0; slot < 7; slot++) {
+            int i = navigationOrder[slot];
+            if (slot % columns) ImGui::SameLine();
+            ImGui::PushStyleColor(ImGuiCol_Button, i == activeSection ? ImVec4{0.015f,0.015f,0.02f,1} : ImVec4{0,0,0,0});
+            ImGui::PushStyleColor(ImGuiCol_Text,ImGui::GetStyleColorVec4(i == activeSection ? ImGuiCol_Text : ImGuiCol_TextDisabled));
+            if (ImGui::Button(sections[i], {navWidth,36 * uiScale})) {
                 if (activeSection == 5 && i != 5) { stopMap = true; command = {{"action","mapStop"}}; mapView.sentKey.clear(); }
                 activeSection = i; resetContentScroll = true;
             }
-            ImGui::PopStyleColor();
+            if (i == activeSection) {
+                auto a = ImGui::GetItemRectMin(), b = ImGui::GetItemRectMax();
+                draw->AddRectFilled({a.x + 16 * uiScale,b.y - 2 * uiScale},{b.x - 16 * uiScale,b.y},IM_COL32(112,112,122,255),uiScale);
+            }
+            ImGui::PopStyleColor(2);
         }
         ImGui::Dummy({0,3 * uiScale});
         ImGui::PushStyleColor(ImGuiCol_ChildBg, {0,0,0,0});
@@ -472,6 +564,7 @@ static Json drawPanel(int width, int height) {
         if (activeSection == 5) mapPanel(command);
         if (activeSection == 6) settingsPanel();
         if (activeSection == 2) {
+            sectionHeading("World seed", "Use the seed that generated this world.");
             std::string seed = state.value("seed", "");
             ImGui::TextUnformatted(seed.empty() ? "No seed set" : seed.c_str());
             if (!seed.empty()) {
@@ -490,13 +583,11 @@ static Json drawPanel(int width, int height) {
         }
         if (activeSection == 3) savedPanel(command);
         if (activeSection == 4) {
-            bool treasure = state.value("treasureOutlines", true), spawners = state.value("spawnerOutlines", true), loot = state.value("lootOutlines", true);
-            bool changed = ImGui::Checkbox("Buried treasure outlines", &treasure);
-            changed |= ImGui::Checkbox("Mob spawner outlines", &spawners);
-            changed |= ImGui::Checkbox("Matching loot chest outlines", &loot);
-            if (changed) command = {{"action","outlines"},{"treasure",treasure},{"spawners",spawners},{"loot",loot}};
-            ImGui::TextWrapped("Gold: treasure candidates. Blue: mob spawners. Purple: matching loot chests from the current search. Outlines show through blocks within 512 blocks.");
-            ImGui::TextWrapped("Treasure is identified by chest position, biome and nearby blocks. Placed chests can match these checks.");
+            sectionHeading("Loaded chunks", "Highlight useful objects while you explore.");
+            bool loot = state.value("lootOutlines", true);
+            if (ImGui::Checkbox("Matching loot chest outlines", &loot)) command = {{"action","outlines"},{"loot",loot}};
+            ImGui::TextWrapped("Purple outlines mark matching loot chests from the current search within 512 blocks.");
+            ImGui::TextWrapped("Mob spawners and buried treasure candidates are listed here without outlines. Treasure candidates can include placed chests.");
             auto objects = state.value("loadedObjects", Json::array());
             ImGui::TextDisabled("%zu objects in loaded chunks", objects.size());
             for (size_t i = 0; i < objects.size(); i++) {
