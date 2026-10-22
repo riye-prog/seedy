@@ -10,6 +10,7 @@ import net.minecraft.world.level.levelgen.structure.structures.StrongholdPieces;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.List;
+import java.util.Map;
 import java.util.concurrent.CancellationException;
 
 public final class Locator implements AutoCloseable {
@@ -81,7 +82,11 @@ public final class Locator implements AutoCloseable {
     }
 
     public List<Result> search(long seed, String kind, String target, int x, int y, int z, int radius, LootQuery query, String dimension, String cityFilter) {
-        return search(seed, kind, target, x, y, z, radius, query, dimension, cityFilter, 128);
+        return search(seed, kind, target, x, y, z, radius, query, dimension, cityFilter, 128, Map.of());
+    }
+
+    public List<Result> search(long seed, String kind, String target, int x, int y, int z, int radius, LootQuery query, String dimension, String cityFilter, Map<String, Integer> paperSalts) {
+        return search(seed, kind, target, x, y, z, radius, query, dimension, cityFilter, 128, paperSalts);
     }
 
     BiomeSampler mapBiomes(long seed, String dimension) {
@@ -91,12 +96,17 @@ public final class Locator implements AutoCloseable {
     }
 
     List<Result> mapStructures(long seed, String target, int tileX, int tileZ, String dimension, String cityFilter) {
+        return mapStructures(seed, target, tileX, tileZ, dimension, cityFilter, null);
+    }
+
+    List<Result> mapStructures(long seed, String target, int tileX, int tileZ, String dimension, String cityFilter, Integer paperSalt) {
         int x = tileX * 1024, z = tileZ * 1024;
-        return search(seed, "structure", target, x + 512, 64, z + 512, 1536, LootQuery.NONE, dimension, cityFilter, Integer.MAX_VALUE).stream()
+        String setTarget = target.equals("minecraft:fortress") || target.equals("minecraft:bastion_remnant") ? "minecraft:nether_complexes" : target;
+        return search(seed, "structure", target, x + 512, 64, z + 512, 1536, LootQuery.NONE, dimension, cityFilter, Integer.MAX_VALUE, paperSalt == null ? Map.of() : Map.of(setTarget, paperSalt)).stream()
             .filter(result -> result.x() >= x && result.x() < x + 1024 && result.z() >= z && result.z() < z + 1024).toList();
     }
 
-    private List<Result> search(long seed, String kind, String target, int x, int y, int z, int radius, LootQuery query, String dimension, String cityFilter, int limit) {
+    private List<Result> search(long seed, String kind, String target, int x, int y, int z, int radius, LootQuery query, String dimension, String cityFilter, int limit, Map<String, Integer> paperSalts) {
         validateDimension(dimension);
         if (!List.of("any", "with_elytra", "without_elytra").contains(cityFilter)) throw new IllegalArgumentException("Choose all cities, with elytra, or without elytra.");
         if (!cityFilter.equals("any") && (!kind.equals("structure") || !target.equals("minecraft:end_cities"))) throw new IllegalArgumentException("The elytra filter only applies to End cities.");
@@ -110,6 +120,10 @@ public final class Locator implements AutoCloseable {
             String setTarget = specificNetherStructure ? "minecraft:nether_complexes" : target;
             var set = registries.lookupOrThrow(Registries.STRUCTURE_SET).listElements().filter(h -> h.key().identifier().toString().equals(setTarget)).findFirst().orElseThrow(() -> new IllegalArgumentException("Unknown structure set."));
             var placement = set.value().placement();
+            if (paperSalts.containsKey(setTarget)) {
+                if (!(placement instanceof RandomSpreadStructurePlacement spread)) throw new IllegalArgumentException("This Paper salt does not apply to the selected structure.");
+                placement = PlacementRules.withSalt(spread, paperSalts.get(setTarget));
+            }
             if (!catalog(dimension).structures().contains(target)) throw new IllegalArgumentException("This structure is not available in the selected dimension.");
             var world = structureWorlds.computeIfAbsent(dimension, d -> WorldgenAdapter.structureWorld(registries, seed, d));
             var candidates = new ArrayList<net.minecraft.world.level.ChunkPos>();

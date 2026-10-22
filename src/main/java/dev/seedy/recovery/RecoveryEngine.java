@@ -50,7 +50,7 @@ public final class RecoveryEngine implements AutoCloseable {
                 stage = "Filtering lower bits";
                 var lowerSeeds = lowerCandidates(lifting, cancelled);
                 if (cancelled.getAsBoolean()) return;
-                if (lowerSeeds.isEmpty()) { stage = "No match. Check the observations."; return; }
+                if (lowerSeeds.isEmpty()) { stage = "No match; check observations, world generation version, or Paper placement salts"; return; }
                 if (lowerSeeds.size() > 16) { stage = "Collect more structures to narrow the search. Trial chambers need more observations."; return; }
                 total = lowerSeeds.size() * (1L << 29);
                 checked.set(0);
@@ -76,7 +76,7 @@ public final class RecoveryEngine implements AutoCloseable {
                 }
                 for (var job : jobs) job.get();
                 if (generation.get() != task) return;
-                if (found.get() == null) stage = "No matching seed. Check observations or collect more.";
+                if (found.get() == null) stage = "No matching seed; Paper placement salts or changed generation may conflict";
                 else { stage = "Seed verified"; recovered.accept(found.get()); }
             } catch (Exception e) {
                 if (generation.get() == task) stage = "Search stopped: " + e.getClass().getSimpleName();

@@ -13,7 +13,9 @@ import net.minecraft.world.level.chunk.UpgradeData;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
 
+import static org.junit.jupiter.api.Assertions.assertArrayEquals;
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class BedrockRecoveryTest {
     @BeforeAll static void bootstrap() { SharedConstants.tryDetectVersion(); Bootstrap.bootStrap(); }
@@ -24,9 +26,11 @@ class BedrockRecoveryTest {
         var iron = new BlockPos(51, -30, -29);
         var copper = new BlockPos(52, 20, -28);
         var ordinaryOre = new BlockPos(53, -29, -27);
+        var deepslateCopper = new BlockPos(54, 4, -26);
         chunk.setBlockState(iron, Blocks.RAW_IRON_BLOCK.defaultBlockState(), 0);
         chunk.setBlockState(copper, Blocks.RAW_COPPER_BLOCK.defaultBlockState(), 0);
         chunk.setBlockState(ordinaryOre, Blocks.DEEPSLATE_IRON_ORE.defaultBlockState(), 0);
+        chunk.setBlockState(deepslateCopper, Blocks.DEEPSLATE_COPPER_ORE.defaultBlockState(), 0);
         var recovery = BedrockRecovery.INSTANCE;
         recovery.reset(1L);
         try {
@@ -34,10 +38,10 @@ class BedrockRecoveryTest {
             assertEquals(1, recovery.scannedChunks());
             assertEquals(2, recovery.rawBlocks());
             assertEquals(1, recovery.rawChunks());
-            assertEquals(1, recovery.oreCandidates());
+            assertEquals(2, recovery.oreCandidates());
             recovery.scan(chunk);
             assertEquals(2, recovery.rawBlocks());
-            assertEquals(1, recovery.oreCandidates());
+            assertEquals(2, recovery.oreCandidates());
             chunk.setBlockState(iron, Blocks.STONE.defaultBlockState(), 0);
             recovery.scan(chunk);
             assertEquals(1, recovery.rawBlocks());
@@ -49,5 +53,25 @@ class BedrockRecoveryTest {
         } finally {
             recovery.reset(null);
         }
+    }
+
+    @Test void compactInputKeepsEveryBlockTheVeinHeuristicCanRead() {
+        long raw = entry(-16, -30, 0, 1);
+        long nearbyOre = entry(-12, -26, 0, 2);
+        long nearbyFiller = entry(-20, -34, 4, 3);
+        long distantOre = entry(-11, -30, 0, 2);
+        long bedrock = entry(80, -62, 80, 0);
+        long[] compact = BedrockRecovery.retainNearbyVeins(new long[]{raw, nearbyOre, nearbyFiller, distantOre, bedrock});
+        assertArrayEquals(new long[]{raw, nearbyOre, nearbyFiller, bedrock}, compact);
+        long[] sampled = BedrockRecovery.sampleAbundant(compact, 3);
+        assertTrue(java.util.Arrays.stream(sampled).anyMatch(value -> value == raw));
+        assertTrue(java.util.Arrays.stream(sampled).anyMatch(value -> value == nearbyOre));
+        assertTrue(java.util.Arrays.stream(sampled).anyMatch(value -> value == nearbyFiller));
+        assertArrayEquals(sampled, BedrockRecovery.sampleAbundant(compact, 3));
+    }
+
+    private static long entry(int x, int y, int z, int type) {
+        long coordinateMask = (1L << 26) - 1;
+        return ((long)x & coordinateMask) << 38 | ((long)z & coordinateMask) << 12 | ((long)(y + 64) & 255) << 4 | type;
     }
 }

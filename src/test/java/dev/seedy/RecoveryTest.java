@@ -1,6 +1,7 @@
 package dev.seedy;
 
 import dev.seedy.recovery.Observation;
+import dev.seedy.recovery.PaperSaltRecovery;
 import dev.seedy.recovery.PlacementRule;
 import dev.seedy.recovery.RecoveryEngine;
 import dev.seedy.recovery.SeedHash;
@@ -60,6 +61,36 @@ class RecoveryTest {
                 assertArrayEquals(new int[]{expected.x(),expected.z()},actual,rule.id());
             }
         });
+    }
+
+    @Test void paperSaltOverrideMatchesMinecraftPlacementAcrossVersions() {
+        var registries = WorldgenAdapter.registries();
+        for (String id : List.of("minecraft:ancient_cities", "minecraft:shipwrecks", "minecraft:trial_chambers", "minecraft:end_cities")) {
+            var vanilla = (RandomSpreadStructurePlacement)registries.lookupOrThrow(Registries.STRUCTURE_SET).listElements().filter(holder -> holder.key().identifier().toString().equals(id)).findFirst().orElseThrow().value().placement();
+            var rule = PlacementRules.read(id, vanilla);
+            int override = rule.salt() ^ 0x14a0e36d;
+            var paper = PlacementRules.withSalt(vanilla, override);
+            assertEquals(override, PlacementRules.read(id, paper).salt());
+            for (long seed : new long[]{2589511696370800371L, -123456789L}) for (int region : new int[]{-29, -1, 0, 37}) {
+                var start = paper.getPotentialStructureChunk(seed, region * rule.spacing(), (region + 3) * rule.spacing());
+                assertTrue(rule.matchesWithSalt(seed, override, start.x(), start.z()), id);
+                assertArrayEquals(new int[]{start.x(), start.z()}, new PlacementRule(id, rule.spacing(), rule.separation(), override, rule.triangular()).chunk(seed, region, region + 3));
+            }
+        }
+    }
+
+    @Test void onePaperStartDoesNotClaimAnIndependentSalt() throws Exception {
+        long seed = 2589511696370800371L;
+        var rule = new PlacementRule("minecraft:desert_pyramids", 32, 8, 14357617, false);
+        var changed = new PlacementRule(rule.id(), rule.spacing(), rule.separation(), -7843125, false);
+        var start = changed.chunk(seed, -7, 11);
+        try (var search = new PaperSaltRecovery()) {
+            search.start(seed, rule, List.of(Observation.create(rule, start[0], start[1], "Test")), ignored -> fail("One start cannot uniquely identify a salt"));
+            long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(10);
+            while (search.running() && System.nanoTime() < deadline) Thread.sleep(10);
+            assertFalse(search.running());
+            assertTrue(search.status().contains("Multiple salts"), search.status());
+        }
     }
 
     @Test void hashAndUpperBitsMatchMinecraftForSignedSeeds() {

@@ -65,10 +65,11 @@ static void configureAppearance(float scale) {
     style.FrameRounding = 7;
     style.ChildRounding = 10;
     style.TabRounding = 5;
-    style.WindowPadding = {20, 18};
-    style.FramePadding = {9, 6};
-    style.ItemSpacing = {9, 9};
-    style.CellPadding = {10, 8};
+    style.WindowPadding = {22, 20};
+    style.FramePadding = {13, 9};
+    style.ItemSpacing = {11, 11};
+    style.ItemInnerSpacing = {9, 7};
+    style.CellPadding = {12, 10};
     style.WindowBorderSize = 0;
     style.ChildBorderSize = 0;
     style.FrameBorderSize = 0;
@@ -167,13 +168,28 @@ static void sectionHeading(const char *title, const char *description = nullptr)
 }
 
 static void recoveryPanel(Json &command) {
-    sectionHeading("Seed recovery", "Nearby blocks and structure observations can recover the world seed.");
+    sectionHeading("Seed recovery", "Collect evidence as you play. Choose what to check, then start a search.");
     bool running = state.value("recovering", false);
     auto observations = state.value("observations", Json::array());
     if (!state.value("connected", false)) ImGui::TextDisabled("Join a world to collect observations.");
+    std::string generationVersion = state.value("generationVersion", state.value("gameVersion", "26.2"));
+    ImGui::SetNextItemWidth(198 * uiScale);
+    if (ImGui::BeginCombo("World generation version", generationVersion.c_str())) {
+        for (const char *version : {"26.2", "26.3"}) {
+            bool selected = generationVersion == version;
+            if (ImGui::Selectable(version, selected)) command = {{"action", "generationVersion"}, {"version", version}};
+            if (selected) ImGui::SetItemDefaultFocus();
+        }
+        ImGui::EndCombo();
+    }
+    ImGui::TextDisabled("Client %s    ·    Server reports %s", state.value("gameVersion", "").c_str(), state.value("serverVersion", "Not reported").c_str());
+    ImGui::TextDisabled("Choose the version that generated these chunks; protocol translation may hide it.");
+    bool versionMatches = generationVersion == state.value("gameVersion", "");
+    if (!versionMatches) ImGui::TextWrapped("Use the Seedy jar for this world generation version before recovering from structures or locating them.");
+    ImGui::Separator();
     if (ImGui::Button(state.value("collecting", true) ? "Pause collection" : "Resume collection")) command = {{"action", "collect"}};
     ImGui::SameLine();
-    ImGui::BeginDisabled(!running && (observations.size() < 5 || !state.value("connected", false)));
+    ImGui::BeginDisabled(!running && (state.value("structureEvidenceCount", 0) < 5 || state.value("evidence", 0.0) < 40 || !state.value("connected", false) || state.value("verified", false) || !versionMatches));
     if (ImGui::Button(running ? "Stop search" : "Recover seed")) command = {{"action", running ? "stopRecovery" : "recover"}};
     ImGui::EndDisabled();
     ImGui::SameLine();
@@ -181,7 +197,9 @@ static void recoveryPanel(Json &command) {
     if (ImGui::Button("Rescan")) command = {{"action", "rescan"}};
     ImGui::EndDisabled();
     if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled)) ImGui::SetTooltip("Check loaded chunks again, including structures that loaded in pieces.");
-    ImGui::Spacing();
+    ImGui::Dummy({0,10 * uiScale});
+    ImGui::Separator();
+    ImGui::Dummy({0,5 * uiScale});
     ImGui::TextUnformatted("Loaded block patterns");
     ImGui::SameLine();
     ImGui::TextDisabled("%d chunks  ·  %d raw iron/copper blocks in %d chunks  ·  %d ore candidates", state.value("patternChunks", 0), state.value("patternRawBlocks", 0), state.value("patternRawChunks", 0), state.value("patternOreCandidates", 0));
@@ -211,7 +229,9 @@ static void recoveryPanel(Json &command) {
         ImGui::SameLine();
         if (ImGui::Button("Stop block check")) command = {{"action", "stopBlockRecovery"}};
     }
-    ImGui::Spacing();
+    ImGui::Dummy({0,10 * uiScale});
+    ImGui::Separator();
+    ImGui::Dummy({0,5 * uiScale});
     ImGui::TextUnformatted("Nether bedrock");
     ImGui::SameLine();
     ImGui::TextDisabled("%d chunks  ·  %d floor  ·  %d roof", state.value("netherPatternChunks", 0), state.value("netherPatternFloor", 0), state.value("netherPatternRoof", 0));
@@ -227,8 +247,11 @@ static void recoveryPanel(Json &command) {
         if (ImGui::Button("Check Nether data")) command = {{"action", "tryNetherRecovery"}};
         ImGui::EndDisabled();
     }
-    ImGui::Spacing();
-    ImGui::TextDisabled("%zu observations    %.1f evidence bits", observations.size(), state.value("evidence", 0.0));
+    ImGui::Dummy({0,10 * uiScale});
+    ImGui::Separator();
+    ImGui::Dummy({0,5 * uiScale});
+    ImGui::TextUnformatted("Structure observations");
+    ImGui::TextDisabled("%d of %zu selected    %.1f evidence bits", state.value("selectedObservations", 0), observations.size(), state.value("evidence", 0.0));
     int pending = state.value("pendingChunks", 0);
     if (pending > 0) { ImGui::SameLine(); ImGui::TextDisabled("%d chunks queued", pending); }
     if (ImGui::BeginTable("detection-counts", 4, ImGuiTableFlags_SizingStretchSame)) {
@@ -246,7 +269,8 @@ static void recoveryPanel(Json &command) {
     if (running) ImGui::ProgressBar(static_cast<float>(state.value("progress", 0.0)), {-1, 5 * uiScale}, "");
     if (ImGui::BeginChild("observations", {0, 145 * uiScale}, ImGuiChildFlags_None)) {
         if (observations.empty()) ImGui::TextWrapped("Explore shipwrecks, trial chambers, desert pyramids, or swamp huts. Detected start chunks appear here. For trial chambers, load the starting room as well as the corridors.");
-        else if (ImGui::BeginTable("observation-list", 4, ImGuiTableFlags_RowBg | ImGuiTableFlags_SizingStretchProp)) {
+        else if (ImGui::BeginTable("observation-list", 5, ImGuiTableFlags_RowBg | ImGuiTableFlags_SizingStretchProp)) {
+            ImGui::TableSetupColumn("Use", ImGuiTableColumnFlags_WidthFixed, 50 * uiScale);
             ImGui::TableSetupColumn("Structure", 0, 2);
             ImGui::TableSetupColumn("Start chunk", 0, 1.4f);
             ImGui::TableSetupColumn("Source");
@@ -254,7 +278,10 @@ static void recoveryPanel(Json &command) {
             ImGui::TableHeadersRow();
             for (auto &entry : observations) {
                 ImGui::PushID(entry.at("id").get<std::string>().c_str());
-                ImGui::TableNextRow(); ImGui::TableNextColumn(); ImGui::TextUnformatted(label(entry.at("structure")).c_str());
+                ImGui::TableNextRow(); ImGui::TableNextColumn();
+                bool selected = entry.value("selected", true);
+                if (ImGui::Checkbox("##selected", &selected)) command = {{"action", "selectObservation"}, {"id", entry.at("id")}, {"selected", selected}};
+                ImGui::TableNextColumn(); ImGui::TextUnformatted(label(entry.at("structure")).c_str());
                 ImGui::TableNextColumn(); ImGui::Text("%d, %d", entry.at("chunkX").get<int>(), entry.at("chunkZ").get<int>());
                 ImGui::TableNextColumn(); ImGui::TextDisabled("%s", entry.at("source").get<std::string>().c_str());
                 ImGui::TableNextColumn(); if (ImGui::SmallButton("Remove")) command = {{"action", "remove"}, {"id", entry.at("id")}};
@@ -273,6 +300,45 @@ static void recoveryPanel(Json &command) {
         if (ImGui::Button("Add") && !structure.empty()) command = {{"action", "observe"}, {"structure", structure}, {"x", chunks[0]}, {"z", chunks[1]}};
         ImGui::SameLine(); ImGui::TextDisabled("Use the structure's start chunk.");
     }
+    ImGui::Dummy({0,10 * uiScale});
+    ImGui::Separator();
+    ImGui::Dummy({0,5 * uiScale});
+    ImGui::TextUnformatted("Paper placement");
+    ImGui::TextWrapped("A verified world seed lets Seedy check each observed structure against Paper's default placement. Changed salts need several starts of the same structure.");
+    auto checks = state.value("placementChecks", Json::array());
+    if (!state.value("verified", false)) ImGui::TextDisabled("Verify the world seed first to check Paper settings.");
+    else if (checks.empty()) ImGui::TextDisabled("No observed structure starts to compare yet.");
+    else if (ImGui::BeginTable("paper-checks", 3, ImGuiTableFlags_RowBg | ImGuiTableFlags_SizingStretchProp)) {
+        ImGui::TableSetupColumn("Structure", 0, 2);
+        ImGui::TableSetupColumn("Default matches", 0, 1);
+        ImGui::TableSetupColumn("Status", 0, 2);
+        ImGui::TableHeadersRow();
+        for (const auto &check : checks) {
+            ImGui::TableNextRow();
+            ImGui::TableNextColumn(); ImGui::TextUnformatted(label(check.value("structure", "")).c_str());
+            ImGui::TableNextColumn(); ImGui::Text("%d", check.value("defaultMatches", 0));
+            ImGui::TableNextColumn();
+            if (check.value("recoveredConflicts", 0) > 0) ImGui::TextColored({1,0.71f,0.65f,1}, "Recovered salt conflicts with a new start");
+            else if (check.contains("recoveredSalt")) ImGui::Text("Salt %d", check.value("recoveredSalt", 0));
+            else if (check.value("defaultConflicts", 0) > 0) ImGui::TextColored({1,0.71f,0.65f,1}, "Placement differs; check version or custom salt");
+            else ImGui::TextDisabled("Default fits; salt unconfirmed");
+        }
+        ImGui::EndTable();
+    }
+    static int paperType = 0;
+    ImGui::SetNextItemWidth(250 * uiScale);
+    std::string paperStructure = select("Structure##paper", "paperTypes", paperType);
+    bool paperRunning = state.value("paperRunning", false);
+    ImGui::BeginDisabled(paperRunning || !state.value("verified", false) || paperStructure.empty() || !versionMatches);
+    if (ImGui::Button("Find placement salt")) command = {{"action", "recoverPaperSalt"}, {"structure", paperStructure}};
+    ImGui::EndDisabled();
+    if (paperRunning) {
+        ImGui::SameLine();
+        if (ImGui::Button("Stop salt search")) command = {{"action", "stopPaperSalt"}};
+        ImGui::ProgressBar(static_cast<float>(state.value("paperProgress", 0.0)), {-1, 7 * uiScale}, "");
+    }
+    ImGui::TextDisabled("%s", state.value("paperStatus", "Idle").c_str());
+    ImGui::TextWrapped("Buried treasure, mineshafts, strongholds, slime chunks, and feature seeds use different rules. This search checks random-spread structure placement only.");
 }
 
 static std::string coordinatesOf(const Json &entry) {
@@ -395,7 +461,7 @@ static void locatePanel(Json &command) {
     if (running && ImGui::Button("Cancel")) command = {{"action","cancelSearch"}};
     else ImGui::TextDisabled("%s", state.value("searchStatus", "Idle").c_str());
     ImGui::PushStyleColor(ImGuiCol_Text, ImGui::GetStyleColorVec4(ImGuiCol_TextDisabled));
-    ImGui::TextWrapped(kind == 0 ? "Vanilla generation checked. Coordinates point to a generated piece; height is shown when available." : "Vanilla biomes in the selected dimension at the selected Y, sampled every 64 blocks.");
+    ImGui::TextWrapped(kind == 0 ? "Generated with this version's world rules. Paper settings can change placements; check Recovery for conflicts." : "Vanilla biomes in the selected dimension at the selected Y, sampled every 64 blocks.");
     ImGui::PopStyleColor();
     auto results = state.value("results", Json::array());
     if (state.value("searchDimension", "overworld") != dimension || state.value("searchCityFilter", "any") != selectedCityFilter || state.value("searchTarget", "") != selected || state.value("searchKind", "") != (kind == 0 ? "structure" : "biome") || command.value("action", "") == "cancelSearch") results = Json::array();

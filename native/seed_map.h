@@ -408,6 +408,8 @@ static void mapPanel(Json &command) {
     else if (view.data.value("remaining", 0) > 0) ImGui::TextDisabled("Loading %d tiles...   %d structures",view.data.value("remaining",0),visibleMarkers);
     else if (view.structures && !structuresVisible) ImGui::TextDisabled("Zoom in for structure dots.");
     else ImGui::TextDisabled("%d structures   Biomes at Y %d", visibleMarkers, view.y);
+    std::string mapWarning = view.data.value("warning", "");
+    if (!mapWarning.empty()) ImGui::TextColored({1,0.71f,0.65f,1}, "%s", mapWarning.c_str());
     ImGui::TextDisabled("%d x %d blocks   Sampling: %d blocks%s",maxX - minX,maxZ - minZ,drawnStep,drawnStep != step ? " (updating)" : "");
     ImGui::EndChild();
 }

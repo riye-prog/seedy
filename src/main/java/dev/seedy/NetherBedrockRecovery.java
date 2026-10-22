@@ -105,7 +105,8 @@ public final class NetherBedrockRecovery implements AutoCloseable {
                 lastScanTick = ticks;
             }
         }
-        if (!running && canTry() && ticks - lastScanTick >= 40) startSearch();
+        if (!running && canTry() && ticks - lastScanTick >= 40) status = "Ready to check Nether bedrock";
+        else if (!running && scanned.size() >= CHUNKS_PER_ATTEMPT && floorCount < MIN_BEDROCK_PER_SIDE && roofCount < MIN_BEDROCK_PER_SIDE) status = "Nether bedrock layers differ; Paper flat bedrock or changed terrain may block this check";
     }
 
     private void scan(LevelChunk chunk) {
@@ -179,7 +180,7 @@ public final class NetherBedrockRecovery implements AutoCloseable {
                         status = "Could not read Nether bedrock sample";
                         return;
                     }
-                    if (count == 0) status = "Nether bedrock did not match the world seed hash";
+                    if (count == 0) status = "Nether bedrock did not match; Paper flat bedrock, changed terrain, or a separate dimension seed may interfere";
                     else if (count == 1) {
                         long worldSeed = results.get(ValueLayout.JAVA_LONG, 0);
                         Minecraft.getInstance().execute(() -> {

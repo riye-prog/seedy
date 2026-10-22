@@ -4,14 +4,17 @@ import com.google.gson.Gson;
 import com.google.gson.JsonObject;
 import dev.seedy.recovery.Observation;
 import dev.seedy.recovery.PlacementRule;
+import dev.seedy.recovery.PaperSaltRecovery;
 import dev.seedy.recovery.RecoveryEngine;
 import dev.seedy.recovery.SeedHash;
 import net.minecraft.client.Minecraft;
 import net.minecraft.core.registries.Registries;
 import net.minecraft.world.level.levelgen.structure.placement.RandomSpreadStructurePlacement;
 import java.util.LinkedHashMap;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
@@ -21,12 +24,16 @@ public final class Workbench implements AutoCloseable {
     public static final Workbench INSTANCE = new Workbench();
     private static final Gson JSON = new Gson();
     private final RecoveryEngine recovery = new RecoveryEngine();
+    private final PaperSaltRecovery paperRecovery = new PaperSaltRecovery();
     private final LinkedHashMap<String, Observation> observations = new LinkedHashMap<>();
+    private final Set<String> excludedObservations = new HashSet<>();
+    private final LinkedHashMap<String, Integer> paperSalts = new LinkedHashMap<>();
     private final LinkedHashMap<String, SessionStore.SavedLocation> savedLocations = new LinkedHashMap<>();
     private SessionStore store;
     private UiSettings uiStore;
     private JsonObject uiSettings = UiSettings.normalize(new JsonObject());
     private String gameVersion;
+    private String generationVersion;
     private String storageStatus = "Join a world to save progress";
     private boolean dirty;
     private boolean storageWritable = true;
@@ -56,11 +63,11 @@ public final class Workbench implements AutoCloseable {
     private boolean collecting = true;
     private long session;
     private long revision;
-    private long attemptedRevision = -1;
     private int ticks;
 
     public void initialize() {
         gameVersion = net.minecraft.SharedConstants.getCurrentVersion().name();
+        generationVersion = gameVersion;
         store = new SessionStore(net.fabricmc.loader.api.FabricLoader.getInstance().getConfigDir().resolve("seedy/sessions"), gameVersion);
         uiStore = new UiSettings(net.fabricmc.loader.api.FabricLoader.getInstance().getConfigDir().resolve("seedy/ui.json"));
         try { uiSettings = uiStore.load(); }
@@ -74,7 +81,7 @@ public final class Workbench implements AutoCloseable {
             if (!(holder.value().placement() instanceof RandomSpreadStructurePlacement placement)) return;
             String id = holder.key().identifier().toString();
             var rule = PlacementRules.read(id, placement);
-            if (rule.canLift()) loaded.put(id, rule);
+            if (rule.bound() > 1) loaded.put(id, rule);
         });
         rules = Map.copyOf(loaded);
         publish(Minecraft.getInstance());
@@ -96,14 +103,17 @@ public final class Workbench implements AutoCloseable {
         seed = null;
         verified = false;
         observations.clear();
+        excludedObservations.clear();
+        paperSalts.clear();
+        generationVersion = gameVersion;
         savedLocations.clear();
         dirty = false;
         storageWritable = true;
         error = "";
         storageStatus = seedHash == null ? "Join a world to save progress" : "Progress saves locally";
         revision++;
-        attemptedRevision = -1;
         recovery.cancel();
+        paperRecovery.cancel();
         cancelSearch();
         if (seedHash != null && store != null) {
             try {
@@ -114,10 +124,13 @@ public final class Workbench implements AutoCloseable {
                     seed = saved.seed();
                     verified = saved.verified() && seed != null && SeedHash.hash(Long.parseLong(seed)) == seedHash;
                     collecting = saved.collecting();
+                    if (saved.generationVersion() != null) generationVersion = saved.generationVersion();
+                    if (saved.excludedObservations() != null) excludedObservations.addAll(saved.excludedObservations());
+                    if (verified && saved.paperSalts() != null) saved.paperSalts().forEach((kind, salt) -> { if (rules.containsKey(kind) && salt != null) paperSalts.put(kind, salt); });
                     dirty = false;
                     storageStatus = "Restored saved progress";
                 }
-            } catch (Exception e) { observations.clear(); savedLocations.clear(); seed = null; verified = false; dirty = false; storageWritable = false; storageStatus = "Saved file could not be loaded"; error = "Progress could not be restored. The saved file has been left unchanged."; }
+            } catch (Exception e) { observations.clear(); excludedObservations.clear(); paperSalts.clear(); savedLocations.clear(); seed = null; verified = false; dirty = false; storageWritable = false; storageStatus = "Saved file could not be loaded"; error = "Progress could not be restored. The saved file has been left unchanged."; }
         }
         publish(Minecraft.getInstance());
     }
@@ -137,27 +150,39 @@ public final class Workbench implements AutoCloseable {
         dirty = true;
         revision++;
         recovery.cancel();
+        paperRecovery.cancel();
     }
 
     public void tick(Minecraft client) {
         if (catalog == null) return;
-        if (collecting && hash != null && !verified && !recovery.running() && revision != attemptedRevision && observations.size() >= 5 && RecoveryEngine.evidenceBits(List.copyOf(observations.values())) >= 40) startRecovery();
         if (++ticks % 5 == 0) publish(client);
         if (ticks % 100 == 0) saveSession();
     }
 
     private void startRecovery() {
         if (hash == null) throw new IllegalArgumentException("Join a world to receive its seed hash.");
-        attemptedRevision = revision;
+        if (!generationVersion.equals(gameVersion)) throw new IllegalArgumentException("Use the matching 26.2 or 26.3 Seedy jar to recover this world's seed from structures.");
+        if (verified) throw new IllegalArgumentException("The world seed is already verified.");
+        var selected = structureEvidence();
+        if (selected.size() < 5 || RecoveryEngine.evidenceBits(selected) < 40) throw new IllegalArgumentException("Select at least five independent structures with 40 evidence bits.");
         long world = session;
-        recovery.start(List.copyOf(observations.values()), hash, value -> Minecraft.getInstance().execute(() -> {
-            if (session != world) return;
+        long evidenceRevision = revision;
+        recovery.start(selected, hash, value -> Minecraft.getInstance().execute(() -> {
+            if (session != world || revision != evidenceRevision) return;
             seed = Long.toString(value);
             seedMap.reset();
             verified = true;
             dirty = true;
             cancelSearch();
         }));
+    }
+
+    private List<Observation> selectedObservations() {
+        return observations.values().stream().filter(observation -> !excludedObservations.contains(observation.id())).toList();
+    }
+
+    private List<Observation> structureEvidence() {
+        return selectedObservations().stream().filter(observation -> observation.rule().canLift() && !paperSalts.containsKey(observation.structure())).toList();
     }
 
     public boolean acceptBlockSeed(long value) {
@@ -189,23 +214,55 @@ public final class Workbench implements AutoCloseable {
                 case "tryNetherRecovery" -> NetherBedrockRecovery.INSTANCE.tryCurrentData();
                 case "stopNetherRecovery" -> NetherBedrockRecovery.INSTANCE.stopSearch();
                 case "recover" -> startRecovery();
-                case "stopRecovery" -> { recovery.cancel(); attemptedRevision = revision; }
+                case "stopRecovery" -> { recovery.cancel(); revision++; }
+                case "recoverPaperSalt" -> recoverPaperSalt(body.get("structure").getAsString());
+                case "stopPaperSalt" -> { paperRecovery.cancel(); revision++; }
+                case "selectObservation" -> {
+                    String id = body.get("id").getAsString();
+                    if (!observations.containsKey(id)) throw new IllegalArgumentException("That observation is no longer available.");
+                    if (body.get("selected").getAsBoolean()) excludedObservations.remove(id);
+                    else excludedObservations.add(id);
+                    recovery.cancel();
+                    paperRecovery.cancel();
+                    revision++;
+                }
+                case "generationVersion" -> {
+                    String version = body.get("version").getAsString();
+                    if (!List.of("26.2", "26.3").contains(version)) throw new IllegalArgumentException("Choose a supported generation version.");
+                    if (!version.equals(generationVersion)) {
+                        generationVersion = version;
+                        recovery.cancel();
+                        paperRecovery.cancel();
+                        cancelSearch();
+                        paperSalts.clear();
+                        revision++;
+                    }
+                }
                 case "seed" -> {
                     try { seed = Long.toString(Long.parseLong(body.get("seed").getAsString().trim())); }
                     catch (NumberFormatException e) { throw new IllegalArgumentException("Enter a whole number from -9223372036854775808 to 9223372036854775807."); }
-                    verified = false;
+                    verified = hash != null && SeedHash.hash(Long.parseLong(seed)) == hash;
+                    paperSalts.clear();
+                    paperRecovery.cancel();
+                    revision++;
                     seedMap.reset();
                     cancelSearch();
                 }
-                case "clearSeed" -> { seed = null; verified = false; seedMap.reset(); cancelSearch(); }
+                case "clearSeed" -> { seed = null; verified = false; paperSalts.clear(); paperRecovery.cancel(); revision++; seedMap.reset(); cancelSearch(); }
                 case "map" -> {
                     if (seed == null) throw new IllegalArgumentException("Recover or enter a seed first.");
-                    seedMap.request(new SeedMap.Request(body.get("id").getAsLong(), Long.parseLong(seed), body.get("dimension").getAsString(), body.get("y").getAsInt(), body.get("step").getAsInt(), body.get("minX").getAsInt(), body.get("minZ").getAsInt(), body.get("maxX").getAsInt(), body.get("maxZ").getAsInt(), body.get("target").getAsString(), body.get("cityFilter").getAsString()));
+                    if (!generationVersion.equals(gameVersion)) throw new IllegalArgumentException("Use the matching 26.2 or 26.3 Seedy jar for the map in this world.");
+                    String target = body.get("target").getAsString();
+                    Integer placementSalt = null;
+                    String warning = "";
+                    if (!target.isEmpty()) try { placementSalt = checkedPlacementSalt(target); }
+                    catch (IllegalArgumentException conflict) { warning = conflict.getMessage(); }
+                    seedMap.request(new SeedMap.Request(body.get("id").getAsLong(), Long.parseLong(seed), body.get("dimension").getAsString(), body.get("y").getAsInt(), body.get("step").getAsInt(), body.get("minX").getAsInt(), body.get("minZ").getAsInt(), body.get("maxX").getAsInt(), body.get("maxZ").getAsInt(), target, body.get("cityFilter").getAsString(), placementSalt, warning.isEmpty(), warning));
                     mapVisible = true;
                 }
                 case "mapStop" -> stopMap();
                 case "observe" -> observe(body.get("structure").getAsString(), body.get("x").getAsInt(), body.get("z").getAsInt(), "Manual");
-                case "remove" -> { observations.remove(body.get("id").getAsString()); revision++; recovery.cancel(); }
+                case "remove" -> { String id = body.get("id").getAsString(); observations.remove(id); excludedObservations.remove(id); revision++; recovery.cancel(); paperRecovery.cancel(); }
                 case "locate" -> locate(body);
                 case "cancelSearch" -> cancelSearch();
                 case "chests" -> {
@@ -219,7 +276,7 @@ public final class Workbench implements AutoCloseable {
                 case "copy" -> Minecraft.getInstance().keyboardHandler.setClipboard(body.get("text").getAsString());
                 default -> throw new IllegalArgumentException("Unknown action");
             }
-            if (java.util.Set.of("seed", "clearSeed", "collect", "rescan", "observe", "remove", "pin", "unpin").contains(action)) dirty = true;
+            if (java.util.Set.of("seed", "clearSeed", "collect", "rescan", "observe", "remove", "selectObservation", "generationVersion", "pin", "unpin").contains(action)) dirty = true;
             if (body.has("preferences") && uiStore != null) uiSettings = uiStore.save(body.getAsJsonObject("preferences"));
         } catch (Exception e) { error = e.getMessage() == null ? "Invalid input" : e.getMessage(); }
         publish(Minecraft.getInstance());
@@ -227,8 +284,10 @@ public final class Workbench implements AutoCloseable {
 
     private void locate(JsonObject body) {
         if (seed == null) throw new IllegalArgumentException("Recover or enter a seed first.");
+        if (!generationVersion.equals(gameVersion)) throw new IllegalArgumentException("Use the matching 26.2 or 26.3 Seedy jar for location searches in this world.");
         long value = Long.parseLong(seed);
         String kind = body.get("kind").getAsString(), target = body.get("target").getAsString();
+        if (kind.equals("structure")) checkedPlacementSalt(target);
         int x = body.get("x").getAsInt(), y = body.get("y").getAsInt(), z = body.get("z").getAsInt(), radius = body.get("radius").getAsInt();
         var requirements = new java.util.ArrayList<LootQuery.Requirement>();
         if (body.has("lootRequirements")) for (var entry : body.getAsJsonArray("lootRequirements")) {
@@ -245,9 +304,10 @@ public final class Workbench implements AutoCloseable {
         searchDimension = dimension;
         searchCityFilter = cityFilter;
         searchStatus = "Searching";
+        var activeSalts = Map.copyOf(paperSalts);
         search = searches.submit(() -> {
             try {
-                var found = locator.search(value, kind, target, x, y, z, radius, query, dimension, cityFilter);
+                var found = locator.search(value, kind, target, x, y, z, radius, query, dimension, cityFilter, activeSalts);
                 Minecraft.getInstance().execute(() -> {
                     if (searchGeneration.get() != generation) return;
                     results = found;
@@ -276,6 +336,39 @@ public final class Workbench implements AutoCloseable {
         });
     }
 
+    private void recoverPaperSalt(String kind) {
+        if (seed == null || !verified) throw new IllegalArgumentException("Verify the world seed before checking a Paper placement salt.");
+        if (!generationVersion.equals(gameVersion)) throw new IllegalArgumentException("Use the matching 26.2 or 26.3 Seedy jar to check Paper placement.");
+        var rule = rules.get(kind);
+        if (rule == null) throw new IllegalArgumentException("Choose a supported random-spread structure.");
+        var selected = selectedObservations().stream().filter(observation -> observation.structure().equals(kind)).toList();
+        long world = session;
+        long evidenceRevision = revision;
+        long value = Long.parseLong(seed);
+        paperRecovery.start(value, rule, selected, salt -> Minecraft.getInstance().execute(() -> {
+            if (session != world || revision != evidenceRevision || seed == null || Long.parseLong(seed) != value) return;
+            paperSalts.put(kind, salt);
+            dirty = true;
+            cancelSearch();
+            seedMap.reset();
+        }));
+    }
+
+    private Integer checkedPlacementSalt(String target) {
+        String kind = target.equals("minecraft:fortress") || target.equals("minecraft:bastion_remnant") ? "minecraft:nether_complexes" : target;
+        Integer recovered = paperSalts.get(kind);
+        if (!verified || seed == null) return recovered;
+        var rule = rules.get(kind);
+        if (rule == null) return recovered;
+        long value = Long.parseLong(seed);
+        if (recovered != null) {
+            if (selectedObservations().stream().anyMatch(observation -> observation.structure().equals(kind) && !rule.matchesWithSalt(value, recovered, observation.chunkX(), observation.chunkZ()))) throw new IllegalArgumentException("An observed " + kind.replace("minecraft:", "") + " start conflicts with the recovered Paper salt. Check the observation or generation version.");
+            return recovered;
+        }
+        if (selectedObservations().stream().anyMatch(observation -> observation.structure().equals(kind) && !rule.matchesWithSalt(value, rule.salt(), observation.chunkX(), observation.chunkZ()))) throw new IllegalArgumentException("Selected " + kind.replace("minecraft:", "") + " placement conflicts with the default salt. Recover its Paper salt or deselect the incorrect observation before locating.");
+        return null;
+    }
+
     private void cancelSearch() {
         searchGeneration.incrementAndGet();
         if (search != null) search.cancel(true);
@@ -299,7 +392,7 @@ public final class Workbench implements AutoCloseable {
         if (!dirty || hash == null || store == null || !storageWritable) return;
         try {
             var evidence = observations.values().stream().map(o -> new SessionStore.Evidence(o.structure(), o.chunkX(), o.chunkZ(), o.source())).toList();
-            store.save(new SessionStore.Session(1, gameVersion, hash, seed, verified, collecting, evidence, List.copyOf(savedLocations.values())));
+            store.save(new SessionStore.Session(1, gameVersion, hash, seed, verified, collecting, evidence, List.copyOf(savedLocations.values()), generationVersion, List.copyOf(excludedObservations), Map.copyOf(paperSalts)));
             dirty = false;
             storageStatus = "Saved locally";
         } catch (Exception e) { storageStatus = "Could not save progress"; }
@@ -315,7 +408,38 @@ public final class Workbench implements AutoCloseable {
         state.addProperty("recovering", recovery.running());
         state.addProperty("recoveryStatus", recovery.stage());
         state.addProperty("progress", recovery.progress());
-        state.addProperty("evidence", RecoveryEngine.evidenceBits(List.copyOf(observations.values())));
+        state.addProperty("evidence", RecoveryEngine.evidenceBits(structureEvidence()));
+        state.addProperty("selectedObservations", selectedObservations().size());
+        state.addProperty("structureEvidenceCount", structureEvidence().size());
+        state.addProperty("generationVersion", generationVersion);
+        state.addProperty("paperRunning", paperRecovery.running());
+        state.addProperty("paperStatus", paperRecovery.status());
+        state.addProperty("paperProgress", paperRecovery.progress());
+        state.add("paperSalts", JSON.toJsonTree(paperSalts));
+        state.add("paperTypes", JSON.toJsonTree(selectedObservations().stream().map(Observation::structure).distinct().sorted().toList()));
+        var placementChecks = new com.google.gson.JsonArray();
+        if (verified && seed != null) {
+            long worldSeed = Long.parseLong(seed);
+            for (var kind : selectedObservations().stream().map(Observation::structure).distinct().sorted().toList()) {
+                var rule = rules.get(kind);
+                int matched = 0, changed = 0;
+                for (var observation : selectedObservations()) if (observation.structure().equals(kind)) {
+                    if (rule.matchesWithSalt(worldSeed, rule.salt(), observation.chunkX(), observation.chunkZ())) matched++;
+                    else changed++;
+                }
+                var check = new JsonObject();
+                check.addProperty("structure", kind);
+                check.addProperty("defaultMatches", matched);
+                check.addProperty("defaultConflicts", changed);
+                if (paperSalts.containsKey(kind)) {
+                    int recovered = paperSalts.get(kind);
+                    check.addProperty("recoveredSalt", recovered);
+                    check.addProperty("recoveredConflicts", selectedObservations().stream().filter(observation -> observation.structure().equals(kind) && !rule.matchesWithSalt(worldSeed, recovered, observation.chunkX(), observation.chunkZ())).count());
+                }
+                placementChecks.add(check);
+            }
+        }
+        state.add("placementChecks", placementChecks);
         state.addProperty("searchStatus", searchStatus);
         state.addProperty("searchTarget", searchTarget);
         state.addProperty("searchKind", searchKind);
@@ -353,10 +477,18 @@ public final class Workbench implements AutoCloseable {
         state.addProperty("searchGeneration", searchGeneration.get());
         state.addProperty("dimension", client.level == null ? "overworld" : client.level.dimension().identifier().getPath());
         state.addProperty("gameVersion", gameVersion);
+        var server = client.getCurrentServer();
+        state.addProperty("serverVersion", server == null ? client.hasSingleplayerServer() ? gameVersion + " (local)" : "Not reported" : server.version == null ? "Not reported" : server.version.getString());
         state.addProperty("x", client.player == null ? 0 : client.player.getBlockX());
         state.addProperty("y", client.player == null ? 64 : client.player.getBlockY());
         state.addProperty("z", client.player == null ? 0 : client.player.getBlockZ());
-        state.add("observations", JSON.toJsonTree(observations.values()));
+        var observationState = new com.google.gson.JsonArray();
+        for (var observation : observations.values()) {
+            var entry = JSON.toJsonTree(observation).getAsJsonObject();
+            entry.addProperty("selected", !excludedObservations.contains(observation.id()));
+            observationState.add(entry);
+        }
+        state.add("observations", observationState);
         state.add("results", resultSummaries);
         state.addProperty("chestDetailIndex", chestDetails);
         if (chestDetails >= 0 && chestDetails < results.size()) state.add("chestDetails", JSON.toJsonTree(results.get(chestDetails)));
@@ -367,5 +499,5 @@ public final class Workbench implements AutoCloseable {
         snapshot = JSON.toJson(state);
     }
 
-    @Override public void close() { saveSession(); recovery.close(); seedMap.close(); cancelSearch(); if (locator != null) searches.submit(locator::close); searches.shutdown(); }
+    @Override public void close() { saveSession(); recovery.close(); paperRecovery.close(); seedMap.close(); cancelSearch(); if (locator != null) searches.submit(locator::close); searches.shutdown(); }
 }

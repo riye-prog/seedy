@@ -151,9 +151,8 @@ public final class BedrockRecovery implements AutoCloseable {
         }
         if (attempted && !running && (evidenceChunks >= lastAttemptEvidenceChunks + 64 || rawCount >= lastAttemptRawBlocks + 12 && rawChunks >= lastAttemptRawChunks + 4)) attempted = false;
         if (!running && !attempted && queue.isEmpty() && ticks - lastScanTick >= 100) {
-            if (Workbench.INSTANCE.structureRecoveryRunning()) status = "Checking detected structures first";
-            else if (evidenceChunks >= MIN_EVIDENCE_CHUNKS && rawCount >= MIN_RAW_BLOCKS && rawChunks >= MIN_RAW_CHUNKS) startSearch();
-            else if (scanned.size() >= 256) status = rawCount == 0 ? "No raw iron/copper blocks in loaded chunks" : "Collecting more ore evidence near spawn";
+            if (evidenceChunks >= MIN_EVIDENCE_CHUNKS && rawCount >= MIN_RAW_BLOCKS && rawChunks >= MIN_RAW_CHUNKS) status = "Ready to check loaded block data";
+            else if (scanned.size() >= 256) status = rawCount == 0 ? "No raw ore seen; anti-xray or changed ore generation may limit this method" : "Collecting more ore evidence near spawn";
         }
     }
 
@@ -193,13 +192,71 @@ public final class BedrockRecovery implements AutoCloseable {
     private static int classify(Block block, int y) {
         if (block == Blocks.BEDROCK) return 0;
         if (block == Blocks.RAW_IRON_BLOCK || block == Blocks.RAW_COPPER_BLOCK) return 1;
-        if (block == Blocks.DEEPSLATE_IRON_ORE || block == Blocks.COPPER_ORE) return 2;
+        if (block == Blocks.DEEPSLATE_IRON_ORE || block == Blocks.COPPER_ORE || block == Blocks.DEEPSLATE_COPPER_ORE) return 2;
         if (block == Blocks.TUFF || block == Blocks.GRANITE) return 3;
         if (y >= -63 && y <= -60 || y >= 1 && y <= 7) {
             if (block == Blocks.DEEPSLATE) return 5;
             if (y >= 1 && block == Blocks.STONE) return 4;
         }
         return -1;
+    }
+
+    private static long packedPosition(int x, int y, int z) {
+        return ((long)x & COORDINATE_MASK) << 38 | ((long)z & COORDINATE_MASK) << 12 | ((long)(y + 64) & 255) << 4;
+    }
+
+    static long[] retainNearbyVeins(long[] entries) {
+        Set<Long> nearby = new HashSet<>();
+        for (long entry : entries) {
+            if ((entry & 15) != 1) continue;
+            int x = (int)(entry >> 38);
+            int z = (int)(entry << 26 >> 38);
+            int y = (int)(entry >> 4 & 255) - 64;
+            for (int dx = -4; dx <= 4; dx++) for (int dy = -4; dy <= 4; dy++) for (int dz = -4; dz <= 4; dz++) {
+                nearby.add(packedPosition(x + dx, y + dy, z + dz));
+            }
+        }
+        long[] kept = new long[entries.length];
+        int count = 0;
+        for (long entry : entries) {
+            int type = (int)(entry & 15);
+            if ((type == 2 || type == 3) && !nearby.contains(entry & ~15L)) continue;
+            kept[count++] = entry;
+        }
+        return Arrays.copyOf(kept, count);
+    }
+
+    static long[] sampleAbundant(long[] entries, int mask) {
+        long[] kept = new long[entries.length];
+        int count = 0;
+        for (long entry : entries) {
+            int type = (int)(entry & 15);
+            if (type == 0 || type == 4 || type == 5) {
+                int x = (int)(entry >> 38);
+                int z = (int)(entry << 26 >> 38);
+                int y = (int)(entry >> 4 & 255) - 64;
+                int hash = x * 0x9e3779b1 ^ z * 0x85ebca77 ^ y * 0xc2b2ae3d;
+                hash ^= hash >>> 16;
+                hash *= 0x7feb352d;
+                hash ^= hash >>> 15;
+                if ((hash & mask) != 0) continue;
+            }
+            kept[count++] = entry;
+        }
+        return Arrays.copyOf(kept, count);
+    }
+
+    private static MemorySegment allocateEntries(long[] entries, Arena arena) {
+        MemorySegment blocks = block_entry.allocateArray(entries.length, arena);
+        for (int i = 0; i < entries.length; i++) {
+            long packed = entries[i];
+            MemorySegment block = block_entry.asSlice(blocks, i);
+            block_entry.x(block, (int)(packed >> 38));
+            block_entry.z(block, (int)(packed << 26 >> 38));
+            block_entry.y(block, (int)(packed >> 4 & 255) - 64);
+            block_entry.typ(block, (int)(packed & 15));
+        }
+        return blocks;
     }
 
     private void startSearch() {
@@ -228,25 +285,27 @@ public final class BedrockRecovery implements AutoCloseable {
                 nativeFailure.remove();
                 nativeMatched = false;
                 loadNative();
+                long[] fullEntries = retainNearbyVeins(entries);
+                long[] sampledEntries = sampleAbundant(fullEntries, 3);
                 try (Arena arena = Arena.ofConfined()) {
-                    MemorySegment blocks = block_entry.allocateArray(entries.length, arena);
-                    for (int i = 0; i < entries.length; i++) {
-                        long packed = entries[i];
-                        MemorySegment entry = block_entry.asSlice(blocks, i);
-                        block_entry.x(entry, (int)(packed >> 38));
-                        block_entry.z(entry, (int)(packed << 26 >> 38));
-                        block_entry.y(entry, (int)(packed >> 4 & 255) - 64);
-                        block_entry.typ(entry, (int)(packed & 15));
-                    }
-                    BedrockNative.bedrockseed$crack(entries.length, blocks, 31);
-                    if (generation == runGeneration && !nativeMatched && !cancelRequested && !Workbench.INSTANCE.hasVerifiedSeed()) {
+                    MemorySegment[] blocks = {allocateEntries(sampledEntries, arena), null};
+                    long[][] evidence = {sampledEntries, fullEntries};
+                    int[] modes = {63, 63, 31, 31};
+                    int[] sources = {0, 1, 0, 1};
+                    for (int index = 0; index < modes.length; index++) {
+                        if (generation != runGeneration || nativeMatched || cancelRequested || Workbench.INSTANCE.hasVerifiedSeed()) break;
                         nativeFailure.remove();
-                        status = "Checking uncertain ore patterns";
                         candidateStartedAt = 0;
                         checkedCandidates = 0;
                         totalCandidates = 0;
-                        pass = 2;
-                        BedrockNative.bedrockseed$crack(entries.length, blocks, 63);
+                        pass = index + 1;
+                        status = sources[index] == 0 ? "Checking nearby block sample" : "Checking full block sample";
+                        if (blocks[sources[index]] == null) blocks[sources[index]] = allocateEntries(fullEntries, arena);
+                        BedrockNative.bedrockseed$crack(evidence[sources[index]].length, blocks[sources[index]], modes[index]);
+                        if (totalCandidates > 0 && !nativeMatched) {
+                            nativeFailure.set("No seed matched the server hash; check Paper feature seeds or changed blocks");
+                            break;
+                        }
                     }
                 }
                 if (generation == runGeneration && !found) {
@@ -254,7 +313,7 @@ public final class BedrockRecovery implements AutoCloseable {
                     if (Workbench.INSTANCE.hasVerifiedSeed()) status = "Seed verified from nearby structures";
                     else if (cancelRequested) status = "Search stopped";
                     else if (nativeMatched) status = "Seed found; verifying";
-                    else status = failure == null ? "No matching seed from loaded chunks" : failure;
+                    else status = failure == null ? "No matching seed from this block sample" : failure;
                 }
             } catch (Throwable error) {
                 if (generation == runGeneration) status = "Block-pattern search failed: " + error.getClass().getSimpleName();
@@ -307,8 +366,9 @@ public final class BedrockRecovery implements AutoCloseable {
             return;
         }
         if (!"commands.bedrockcrack.foundWorldSeed".equals(key)) {
-            if ("commands.bedrockcrack.Z3Unsat".equals(key)) INSTANCE.nativeFailure.set("Block patterns conflict; try more untouched chunks");
-            if ("commands.bedrockcrack.Z3Failed".equals(key)) INSTANCE.nativeFailure.set("Could not resolve block patterns from these chunks");
+            if ("commands.bedrockcrack.Z3Unsat".equals(key)) INSTANCE.nativeFailure.set("Block evidence conflicts; check Paper feature seeds or changed blocks");
+            if ("commands.bedrockcrack.Z3Failed".equals(key)) INSTANCE.nativeFailure.set("Could not resolve these block patterns");
+            if ("commands.bedrockcrack.stateValidationFailed".equals(key)) INSTANCE.nativeFailure.set("Block evidence conflicts; check Paper feature seeds or changed blocks");
             String phase = switch (key) {
                 case "commands.bedrockcrack.completedBitSearch1" -> "Bedrock pattern checked";
                 case "commands.bedrockcrack.completedBitSearch2" -> "Deepslate pattern checked";
@@ -316,6 +376,8 @@ public final class BedrockRecovery implements AutoCloseable {
                 case "commands.bedrockcrack.completedBitSearch4" -> "Ore type pattern checked";
                 case "commands.bedrockcrack.completedBitSearch5" -> "Raw ore pattern checked";
                 case "commands.bedrockcrack.startingZ3Search" -> "Resolving world seed";
+                case "commands.bedrockcrack.validatingRandomState" -> "Checking random state against loaded blocks";
+                case "commands.bedrockcrack.stateCandidateRejected" -> "Checking another random state";
                 case "commands.bedrockcrack.crackedRandomStateRandom" -> "Checking world seed candidates";
                 default -> null;
             };
@@ -325,8 +387,10 @@ public final class BedrockRecovery implements AutoCloseable {
             return;
         }
         if (values.length == 0 || !(values[0] instanceof Number number)) return;
+        int runGeneration = INSTANCE.runningGeneration;
+        long seed = number.longValue();
         Minecraft.getInstance().execute(() -> {
-            if (shouldContinueSearch() && Workbench.INSTANCE.acceptBlockSeed(number.longValue())) {
+            if (INSTANCE.generation == runGeneration && !INSTANCE.cancelRequested && Workbench.INSTANCE.acceptBlockSeed(seed)) {
                 INSTANCE.found = true;
                 INSTANCE.status = "Seed recovered from loaded blocks";
             }

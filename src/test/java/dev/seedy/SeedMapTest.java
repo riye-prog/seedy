@@ -22,6 +22,7 @@ class SeedMapTest {
         assertThrows(IllegalArgumentException.class, () -> new SeedMap.Request(1,1,"overworld",64,3,0,0,127,127,"","any"));
         assertThrows(IllegalArgumentException.class, () -> new SeedMap.Request(1,1,"overworld",64,4,Integer.MIN_VALUE,0,0,0,"","any"));
         assertFalse(new SeedMap.Request(1,1,"overworld",64,64,-4096,-4096,4096,4096,"minecraft:ancient_cities","any").showStructures());
+        assertFalse(new SeedMap.Request(1,1,"overworld",64,16,0,0,1023,1023,"minecraft:ancient_cities","any",null,false,"Placement differs").showStructures());
         assertDoesNotThrow(() -> new SeedMap.Request(1,1,"overworld",64,4,0,0,2047,2047,"","any"));
         assertThrows(IllegalArgumentException.class,() -> new SeedMap.Request(1,1,"overworld",64,4,0,0,2048,2047,"","any"));
     }

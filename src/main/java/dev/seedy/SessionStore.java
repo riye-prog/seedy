@@ -8,11 +8,12 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.StandardCopyOption;
 import java.util.List;
+import java.util.Map;
 
 final class SessionStore {
     record Evidence(String structure, int chunkX, int chunkZ, String source) { }
     record SavedLocation(String id, String seed, String name, int x, Integer y, int z, String dimension, String confidence) { }
-    record Session(int schema, String version, long seedHash, String seed, boolean verified, boolean collecting, List<Evidence> observations, List<SavedLocation> locations) { }
+    record Session(int schema, String version, long seedHash, String seed, boolean verified, boolean collecting, List<Evidence> observations, List<SavedLocation> locations, String generationVersion, List<String> excludedObservations, Map<String, Integer> paperSalts) { }
     private static final Gson JSON = new Gson();
     private final Path directory;
     private final String version;
@@ -30,7 +31,7 @@ final class SessionStore {
         if (Files.size(file) > 1_048_576) throw new IOException("Saved session is too large");
         try {
             var session = JSON.fromJson(Files.readString(file), Session.class);
-            if (session == null || session.schema() != 1 || !version.equals(session.version()) || session.seedHash() != hash || session.observations() == null || session.locations() == null || session.observations().size() > 512 || session.locations().size() > 256) throw new IOException("Saved session is invalid");
+            if (session == null || session.schema() != 1 || !version.equals(session.version()) || session.seedHash() != hash || session.observations() == null || session.locations() == null || session.observations().size() > 512 || session.locations().size() > 256 || session.excludedObservations() != null && session.excludedObservations().size() > 512 || session.paperSalts() != null && session.paperSalts().size() > 64 || session.generationVersion() != null && !List.of("26.2", "26.3").contains(session.generationVersion())) throw new IOException("Saved session is invalid");
             if (session.seed() != null) Long.parseLong(session.seed());
             return session;
         } catch (JsonParseException | NumberFormatException e) { throw new IOException("Saved session could not be read", e); }

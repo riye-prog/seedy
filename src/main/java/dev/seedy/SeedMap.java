@@ -13,18 +13,21 @@ import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
 
 public final class SeedMap implements AutoCloseable {
-    public record Request(long id, long seed, String dimension, int y, int step, int minX, int minZ, int maxX, int maxZ, String target, String cityFilter) {
+    public record Request(long id, long seed, String dimension, int y, int step, int minX, int minZ, int maxX, int maxZ, String target, String cityFilter, Integer paperSalt, boolean structuresAllowed, String warning) {
+        public Request(long id, long seed, String dimension, int y, int step, int minX, int minZ, int maxX, int maxZ, String target, String cityFilter) {
+            this(id, seed, dimension, y, step, minX, minZ, maxX, maxZ, target, cityFilter, null, true, "");
+        }
         public Request {
             if (!List.of("overworld", "the_nether", "the_end").contains(dimension) || y < -64 || y > 320 || step < 4 || step > 65536 || (step & (step - 1)) != 0) throw new IllegalArgumentException("Invalid map settings.");
             if (minX > maxX || minZ > maxZ || Math.abs((long)minX) > 29_970_000 || Math.abs((long)maxX) > 29_970_000 || Math.abs((long)minZ) > 29_970_000 || Math.abs((long)maxZ) > 29_970_000) throw new IllegalArgumentException("Keep the map inside world bounds.");
             if (tiles(minX, minZ, maxX, maxZ, step * 32).size() > 256) throw new IllegalArgumentException("Too many map tiles.");
             if (!List.of("any", "with_elytra", "without_elytra").contains(cityFilter)) throw new IllegalArgumentException("Invalid End city filter.");
         }
-        boolean showStructures() { return !target.isEmpty() && (long)(Math.floorDiv(maxX,1024) - Math.floorDiv(minX,1024) + 1) * (Math.floorDiv(maxZ,1024) - Math.floorDiv(minZ,1024) + 1) <= 25; }
+        boolean showStructures() { return structuresAllowed && !target.isEmpty() && (long)(Math.floorDiv(maxX,1024) - Math.floorDiv(minX,1024) + 1) * (Math.floorDiv(maxZ,1024) - Math.floorDiv(minZ,1024) + 1) <= 25; }
     }
     record TilePos(int x, int z) { }
     record BiomeKey(long seed, String dimension, int y, int step, TilePos position) { }
-    record StructureKey(long seed, String dimension, String target, String cityFilter, TilePos position) { }
+    record StructureKey(long seed, String dimension, String target, String cityFilter, Integer paperSalt, TilePos position) { }
     record Tile(int x, int z, List<Integer> runs) { }
     record Swatch(String name, int color) { }
     private static final Gson JSON = new Gson();
@@ -105,7 +108,7 @@ public final class SeedMap implements AutoCloseable {
                 if (tile == null) missing.add(key); else completed.add(tile);
             }
             for (var position : structurePositions) {
-                var key = new StructureKey(request.seed(), request.dimension(), request.target(), request.cityFilter(), position);
+                var key = new StructureKey(request.seed(), request.dimension(), request.target(), request.cityFilter(), request.paperSalt(), position);
                 var found = structureCache.get(key);
                 if (found == null) missingStructures.add(key); else markers.addAll(found);
             }
@@ -124,7 +127,7 @@ public final class SeedMap implements AutoCloseable {
             publish(request, token, palette, completed, markers, remaining, "");
             for (var key : missingStructures) {
                 check(token);
-                var found = locator.mapStructures(request.seed(), request.target(), key.position().x(), key.position().z(), request.dimension(), request.cityFilter());
+                var found = locator.mapStructures(request.seed(), request.target(), key.position().x(), key.position().z(), request.dimension(), request.cityFilter(), request.paperSalt());
                 structureCache.put(key, found);
                 markers.addAll(found);
                 publish(request, token, palette, completed, markers, --remaining, "");

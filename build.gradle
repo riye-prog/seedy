@@ -1,5 +1,5 @@
 plugins { id 'net.fabricmc.fabric-loom' version '1.17.21' }
-version = "0.9.9+${project.name}"
+version = "0.9.10+${project.name}"
 group = 'dev.seedy'
 base.archivesName = 'seedy'
 repositories { mavenCentral() }

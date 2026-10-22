@@ -1,4 +1,5 @@
 from pathlib import Path
+import re
 import sys
 
 
@@ -64,7 +65,7 @@ replacements = [
         '\t\tif(localCompleted) completed.fetch_add(localCompleted, std::memory_order_relaxed);\n'
         '\t};\n'
         '\tunsigned int cores = std::thread::hardware_concurrency();\n'
-        '\tunsigned int workerCount = std::clamp(cores > 1 ? cores - 1 : 1u, 1u, 7u);\n'
+        '\tunsigned int workerCount = std::clamp(cores > 1 ? cores - 1 : 1u, 1u, 32u);\n'
         '\tstd::vector<std::thread> workers;\n'
         '\tworkers.reserve(workerCount - 1);\n'
         '\tfor(unsigned int i = 1; i < workerCount; ++i) {\n'
@@ -81,6 +82,40 @@ for previous, updated in replacements:
     if source.count(previous) != 1:
         raise SystemExit(f"expected one source match, found {source.count(previous)}")
     source = source.replace(previous, updated, 1)
+
+if "--reference" not in sys.argv[3:]:
+    assignments = list(re.finditer(r"^\s*(S[12]_(?:lo|hi|ca|is|cb)\[\d+\])\s*=\s*(.*);$", source, re.MULTILINE))
+    positions = {match[1]: index for index, match in enumerate(assignments)}
+    if len(assignments) != 640 or len(positions) != 640:
+        raise SystemExit("unexpected inverse circuit assignments")
+    checks = []
+    for match in assignments:
+        carry = re.fullmatch(r"(S[12])_c([ab])\[(\d+)\]", match[1])
+        if carry is None or "&" in match[2]:
+            continue
+        state, addition, bit_text = carry.groups()
+        bit = int(bit_text)
+        first = f"{state}_lo[{bit}]" if addition == "a" else f"{state}_is[{(bit - 17) % 64}]"
+        second = f"{state}_hi[{bit}]" if addition == "a" else f"{state}_lo[{bit}]"
+        previous = f"{state}_c{addition}[{bit - 1}]" if bit else "0"
+        expected = f"({first} & {second}) | ({first} & {previous}) | ({second} & {previous})"
+        dependencies = re.findall(r"S[12]_(?:lo|hi|ca|is|cb)\[\d+\]", match[1] + expected)
+        ready = max(positions[name] for name in dependencies)
+        checks.append((ready, match[1], expected))
+    if len(checks) != 40:
+        raise SystemExit("unexpected inverse circuit carry constraints")
+    insertions = {}
+    for number, (ready, carry, expected) in enumerate(sorted(checks), 1):
+        check = f"\n\tsurviving &= ~(({carry}) ^ ({expected}));"
+        if number >= 8 and number % 4 == 0:
+            check += "\n\tif (stdx::reduce(surviving, std::bit_or<>{}) == 0) return false;"
+        insertions.setdefault(ready, []).append(check)
+    for index in reversed(range(len(assignments))):
+        if index in insertions:
+            position = assignments[index].end()
+            source = source[:position] + "".join(insertions[index]) + source[position:]
+    position = assignments[0].start()
+    source = source[:position] + "\n\tsimd surviving = ~uint64_t{};\n" + source[position:]
 
 output.parent.mkdir(parents=True, exist_ok=True)
 if not output.exists() or output.read_text() != source:

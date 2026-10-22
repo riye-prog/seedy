@@ -12,11 +12,27 @@ public record PlacementRule(String id, int spacing, int separation, int salt, bo
         int z = triangular ? (random.nextInt(bound()) + random.nextInt(bound())) / 2 : random.nextInt(bound());
         return new int[]{regionX * spacing + x, regionZ * spacing + z};
     }
+    public boolean possibleStart(int chunkX, int chunkZ) {
+        int rx = Math.floorDiv(chunkX, spacing), rz = Math.floorDiv(chunkZ, spacing);
+        int x = chunkX - rx * spacing, z = chunkZ - rz * spacing;
+        return bound() > 0 && x >= 0 && z >= 0 && x < bound() && z < bound();
+    }
     public Constraint constrain(int chunkX, int chunkZ) {
         int rx = Math.floorDiv(chunkX, spacing), rz = Math.floorDiv(chunkZ, spacing);
         int x = chunkX - rx * spacing, z = chunkZ - rz * spacing;
         if (!canLift() || x >= bound() || z >= bound()) throw new IllegalArgumentException("The start chunk does not fit this structure's placement rule.");
         return new Constraint(regionOffset(rx, rz), bound(), x, z);
+    }
+    public boolean matchesWithSalt(long worldSeed, int candidateSalt, int chunkX, int chunkZ) {
+        if (bound() <= 1) return false;
+        int rx = Math.floorDiv(chunkX, spacing), rz = Math.floorDiv(chunkZ, spacing);
+        int x = chunkX - rx * spacing, z = chunkZ - rz * spacing;
+        if (x < 0 || z < 0 || x >= bound() || z >= bound()) return false;
+        var random = new LegacyRandom(worldSeed + rx * 341873128712L + rz * 132897987541L + candidateSalt);
+        int generatedX = triangular ? (random.nextInt(bound()) + random.nextInt(bound())) / 2 : random.nextInt(bound());
+        if (generatedX != x) return false;
+        int generatedZ = triangular ? (random.nextInt(bound()) + random.nextInt(bound())) / 2 : random.nextInt(bound());
+        return generatedZ == z;
     }
     public record Constraint(long offset, int bound, int x, int z) {
         public boolean matches(long seed) {

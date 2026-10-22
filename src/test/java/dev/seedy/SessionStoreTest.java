@@ -14,7 +14,7 @@ class SessionStoreTest {
         var store = new SessionStore(directory, "26.2");
         var evidence = new SessionStore.Evidence("minecraft:trial_chambers", -34, 68, "Detected");
         var location = new SessionStore.SavedLocation("location", "-1234", "minecraft:ancient_city", -128, -40, 512, "overworld", "Vanilla generation");
-        var session = new SessionStore.Session(1, "26.2", 8765L, "-1234", true, false, List.of(evidence), List.of(location));
+        var session = new SessionStore.Session(1, "26.2", 8765L, "-1234", true, false, List.of(evidence), List.of(location), "26.3", List.of("minecraft:trial_chambers:-34:68"), java.util.Map.of("minecraft:trial_chambers", 94251327));
         store.save(session);
         assertEquals(session, store.load(8765));
         assertNull(store.load(8766));
