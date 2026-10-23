@@ -1,0 +1,145 @@
+{
+  "version": "0.9.15",
+  "source_commit": "75c11df7506a0f5a0ddc29a8dcb662246c72d2f2",
+  "validation": {
+    "method": "post-obfuscation chunks captured through a headless protocol connection to actual paper servers, then command-line native recovery with java world-generation and seed-hash validation",
+    "minecraft_client_launched": false,
+    "seed_supplied_to_solver": false,
+    "world_seed_hash_supplied": true,
+    "hardware": "apple m3, 8 gb ram, 6 recovery threads",
+    "paper_versions": {
+      "26.2": "build 134",
+      "26.3": "build 214"
+    },
+    "headless_receiver_packet_rate_guard_disabled": true
+  },
+  "mode_1_recoveries": [
+    {
+      "client_code_target": "26.2",
+      "generation_version": "26.2",
+      "anti_xray_engine_mode": 1,
+      "chunks": 1000,
+      "visible_raw_blocks": 9,
+      "world_seed_recovered": true,
+      "hash_verified": true,
+      "elapsed_seconds": 224.691346667,
+      "noise_states_rejected": 0,
+      "concurrent_local_builds_or_headless_generation": false,
+      "input_observations": 2102510,
+      "input_sha256": "8263a1bf2daab85286eeaf7107f063801e0177ece59c2f130b9b76c4d6870414"
+    },
+    {
+      "client_code_target": "26.3",
+      "generation_version": "26.2",
+      "anti_xray_engine_mode": 1,
+      "chunks": 1000,
+      "visible_raw_blocks": 9,
+      "world_seed_recovered": true,
+      "hash_verified": true,
+      "elapsed_seconds": 247.012136792,
+      "noise_states_rejected": 0,
+      "concurrent_local_builds_or_headless_generation": true,
+      "input_observations": 2102510,
+      "input_sha256": "8263a1bf2daab85286eeaf7107f063801e0177ece59c2f130b9b76c4d6870414"
+    },
+    {
+      "client_code_target": "26.3",
+      "generation_version": "26.3",
+      "anti_xray_engine_mode": 1,
+      "chunks": 1000,
+      "visible_raw_blocks": 8,
+      "world_seed_recovered": true,
+      "hash_verified": true,
+      "elapsed_seconds": 237.782127625,
+      "noise_states_rejected": 1,
+      "concurrent_local_builds_or_headless_generation": true,
+      "input_observations": 2112343,
+      "input_sha256": "4fb1d14f1089e4845de19ec6ebf52c33f3e90ca05cf79af0623d0559774cd9c4"
+    }
+  ],
+  "java_tests": {
+    "26.2": {
+      "passed": 57,
+      "failed": 0
+    },
+    "26.3": {
+      "passed": 56,
+      "failed": 0
+    }
+  },
+  "native_tests": {
+    "kernel_equivalence": "passed",
+    "rng_constraints_and_cancellation": "passed",
+    "positional_interval_cases": 16384,
+    "candidate_constraint_equivalence_cases": 24,
+    "native_panel_interaction": "passed"
+  },
+  "compatibility_checks": {
+    "portable_26_2_noise_matches_vanilla_samples": 12288,
+    "26_3_noise_accepts_received_26_3_raw_positions": 8
+  },
+  "limits": [
+    "packet replays exercise the recovery engine and version-specific validation, not a launched minecraft client",
+    "timing varies with seed, cpu, available observations, and concurrent work",
+    "hidden, fabricated, edited, or differently generated blocks can still prevent recovery; no universal time guarantee"
+  ],
+  "anti_xray_disabled_regression": {
+    "generation_version": "26.2",
+    "chunks": 1000,
+    "visible_raw_blocks": 214,
+    "world_seed_recovered": true,
+    "hash_verified": true,
+    "elapsed_seconds": 190.350115292,
+    "input_observations": 2095743,
+    "input_sha256": "7872614849aa25c7186d23394a73fe2e5df3630d6a2a45a136772227d9166f1a"
+  },
+  "github_build": {
+    "url": "https://github.com/riye-prog/seedy/actions/runs/39927322410",
+    "conclusion": "success",
+    "source_commit": "75c11df7506a0f5a0ddc29a8dcb662246c72d2f2",
+    "jobs": [
+      {
+        "name": "pattern-native (macos-15-intel, macos-x86_64)",
+        "conclusion": "success"
+      },
+      {
+        "name": "native (macos-latest)",
+        "conclusion": "success"
+      },
+      {
+        "name": "pattern-native (windows-latest, windows-x86_64)",
+        "conclusion": "success"
+      },
+      {
+        "name": "pattern-native (macos-15, macos-arm64)",
+        "conclusion": "success"
+      },
+      {
+        "name": "native (windows-latest)",
+        "conclusion": "success"
+      },
+      {
+        "name": "mod",
+        "conclusion": "success"
+      }
+    ]
+  },
+  "release_artifacts": [
+    {
+      "target": "26.2",
+      "bytes": 33947518,
+      "sha256": "4ed9091d66f8760450e8f3db53892126d4647e3a492cfdf4bd95c7d7f9508d3f",
+      "native_libraries": 16,
+      "verified": true,
+      "name": "seedy-0.9.15+26.2.jar"
+    },
+    {
+      "target": "26.3",
+      "bytes": 33946884,
+      "sha256": "f3e02ca92749f5d780f9b1de07cff69b5ed5a5e05207833f827ddc94aaae240d",
+      "native_libraries": 16,
+      "verified": true,
+      "name": "seedy-0.9.15+26.3.jar"
+    }
+  ]
+}
