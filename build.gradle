@@ -1,5 +1,5 @@
 plugins { id 'net.fabricmc.fabric-loom' version '1.17.21' }
-version = "0.9.15+${project.name}"
+version = "0.9.16+${project.name}"
 group = 'dev.seedy'
 base.archivesName = 'seedy'
 repositories { mavenCentral() }
@@ -30,6 +30,13 @@ tasks.register('recoveryReplay', JavaExec) {
     classpath = sourceSets.test.runtimeClasspath
     mainClass = 'dev.seedy.RecoveryReplay'
     if (project.hasProperty('recoveryArgs')) args project.property('recoveryArgs').split(',')
+}
+tasks.register('recoveryCancelCheck', JavaExec) {
+    dependsOn testClasses
+    classpath = sourceSets.test.runtimeClasspath
+    mainClass = 'dev.seedy.NativeCancellationProbe'
+    jvmArgs '--enable-native-access=ALL-UNNAMED'
+    if (project.hasProperty('cancelArgs')) args project.property('cancelArgs').split(',')
 }
 jar {
     include 'dev/seedy/**', 'bedrock/generated/**', 'assets/seedy/**', 'fabric.mod.json', 'seedy.mixins.json', 'natives/**', 'licenses/**', 'META-INF/MANIFEST.MF'

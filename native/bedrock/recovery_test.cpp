@@ -153,9 +153,10 @@ static void cancellationInterruptsTheSolver() {
     retry.add(context.bool_val(true));
     require(cancellableSolverCheck(retry, shouldContinue) == z3::sat, "solver did not recover after a time limit");
     solver.set("timeout", 0u);
-    std::jthread stop([] { std::this_thread::sleep_for(std::chrono::milliseconds(25)); searching = false; });
+    std::thread stop([] { std::this_thread::sleep_for(std::chrono::milliseconds(25)); searching = false; });
     auto started = std::chrono::steady_clock::now();
     auto result = cancellableSolverCheck(solver, shouldContinue);
+    stop.join();
     require(result == z3::unknown, "cancelled solver did not stop");
     require(std::chrono::steady_clock::now() - started < std::chrono::seconds(2), "solver cancellation took too long");
     require(cancellableSolverCheck(solver, shouldContinue) == z3::unknown, "stopped search restarted the solver");

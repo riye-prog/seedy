@@ -1,8 +1,16 @@
 #include <array>
 
+struct MapSpan {
+    unsigned short start, count;
+    int biome;
+    unsigned char shade;
+};
+
 struct MapTile {
     int x, z;
     std::array<int, 1024> cells;
+    std::array<unsigned char, 1024> shade;
+    std::vector<MapSpan> flat, relief;
 };
 
 struct MapView {
@@ -16,6 +24,7 @@ struct MapView {
     std::vector<MapTile> tiles;
     std::vector<ImU32> colors;
     std::vector<std::string> names;
+    std::vector<bool> water;
     std::vector<double> areas;
     int highlight = -1;
     bool followPlayer = false;
@@ -36,14 +45,34 @@ static void mapReceive(const std::string &dimension) {
     if (incoming.value("revision", -1LL) == mapView.revision || incoming.value("id", -1LL) != mapView.requestId || incoming.value("seed", "") != mapView.seed || incoming.value("dimension", "") != dimension || incoming.value("y", 64) != mapView.y) return;
     mapView.revision = incoming.value("revision", -1LL);
     mapView.data = incoming;
-    mapView.tiles.clear(); mapView.colors.clear(); mapView.names.clear();
+    mapView.tiles.clear(); mapView.colors.clear(); mapView.names.clear(); mapView.water.clear();
     for (const auto &swatch : incoming.value("palette", Json::array())) {
         int rgb = swatch.value("color", 0);
         mapView.colors.push_back(IM_COL32((rgb >> 16) & 255, (rgb >> 8) & 255, rgb & 255, 255));
         mapView.names.push_back(label(swatch.value("name", "")));
+        auto name = swatch.value("name",""); mapView.water.push_back(name.find("ocean") != std::string::npos || name.find("river") != std::string::npos);
     }
     for (const auto &tile : incoming.value("tiles", Json::array())) {
-        MapTile decoded{tile.value("x", 0), tile.value("z", 0), {}};
+        MapTile decoded{tile.value("x", 0), tile.value("z", 0), {}, {}};
+        decoded.shade.fill(128);
+        auto heights = tile.value("heights",std::vector<int>{});
+        if (heights.size() == 49) {
+            std::array<ImVec2,25> gradients;
+            float spacing = incoming.value("step",4) * 16.0f;
+            for (int row = 0; row < 5; row++) for (int col = 0; col < 5; col++) {
+                int center = (row + 1) * 7 + col + 1;
+                gradients[row * 5 + col] = {(heights[center + 1] - heights[center - 1]) / spacing,(heights[center + 7] - heights[center - 7]) / spacing};
+            }
+            for (int row = 0; row < 32; row++) for (int col = 0; col < 32; col++) {
+                int gx = col / 8, gz = row / 8;
+                float dx = (col % 8 + 0.5f) / 8, dz = (row % 8 + 0.5f) / 8;
+                auto a = gradients[gz * 5 + gx], b = gradients[gz * 5 + gx + 1], c = gradients[(gz + 1) * 5 + gx], d = gradients[(gz + 1) * 5 + gx + 1];
+                float gradientX = (a.x * (1 - dx) + b.x * dx) * (1 - dz) + (c.x * (1 - dx) + d.x * dx) * dz;
+                float gradientZ = (a.y * (1 - dx) + b.y * dx) * (1 - dz) + (c.y * (1 - dx) + d.y * dx) * dz;
+                float light = (0.85f - 0.4f * gradientX - 0.32f * gradientZ) / std::sqrt(1 + gradientX * gradientX + gradientZ * gradientZ);
+                decoded.shade[row * 32 + col] = static_cast<unsigned char>(std::clamp(1 + (light - 0.85f) * 0.65f,0.68f,1.22f) * 128);
+            }
+        }
         int offset = 0;
         const auto &runs = tile["runs"];
         for (size_t i = 0; i + 1 < runs.size(); i += 2) {
@@ -52,7 +81,15 @@ static void mapReceive(const std::string &dimension) {
             std::fill_n(decoded.cells.begin() + offset, count, value);
             offset += count;
         }
-        if (offset == 1024) mapView.tiles.push_back(decoded);
+        if (offset == 1024) {
+            for (int mode = 0; mode < 2; mode++) for (int row = 0; row < 32; row++) for (int col = 0; col < 32;) {
+                int first = row * 32 + col, last = col + 1;
+                while (last < 32 && decoded.cells[row * 32 + last] == decoded.cells[first] && (!mode || decoded.shade[row * 32 + last] == decoded.shade[first])) last++;
+                (mode ? decoded.relief : decoded.flat).push_back({static_cast<unsigned short>(first),static_cast<unsigned short>(last - col),decoded.cells[first],decoded.shade[first]});
+                col = last;
+            }
+            mapView.tiles.push_back(std::move(decoded));
+        }
     }
 }
 
@@ -195,7 +232,7 @@ static void mapPanel(Json &command) {
     }
     ImGui::Dummy({0,6 * uiScale});
     ImGui::TextDisabled("About this map");
-    if (ImGui::IsItemHovered()) ImGui::SetTooltip("Colors show biomes at the selected height. Close-up views retain the vanilla 4-block biome sampling grid.");
+    if (ImGui::IsItemHovered()) ImGui::SetTooltip("Colors use Minecraft's block-level biome blending at the selected height. Terrain shading uses predicted ground height. Close-up views sample individual blocks.");
     ImGui::EndChild();
     if (sideBySide) {
         ImGui::SameLine(0,4 * uiScale);
@@ -232,14 +269,14 @@ static void mapPanel(Json &command) {
     view.z = std::clamp(view.z, -29'960'000.0 + halfHeight, 29'960'000.0 - halfHeight);
     int minX = static_cast<int>(std::floor(view.x - halfWidth)), maxX = static_cast<int>(std::ceil(view.x + halfWidth));
     int minZ = static_cast<int>(std::floor(view.z - halfHeight)), maxZ = static_cast<int>(std::ceil(view.z + halfHeight));
-    int step = 4;
-    const double detailPixels[] = {4,2,1};
+    int step = 1;
+    const double detailPixels[] = {4,1.5,0.75};
     while (step < view.blocksPerPixel * detailPixels[preferences.detail]) step *= 2;
     auto tileCount = [&](int span) { return (std::floor(static_cast<double>(maxX) / span) - std::floor(static_cast<double>(minX) / span) + 1) * (std::floor(static_cast<double>(maxZ) / span) - std::floor(static_cast<double>(minZ) / span) + 1); };
-    const int tileBudgets[] = {64,128,256};
+    const int tileBudgets[] = {64,192,512};
     while (tileCount(step * 32) > tileBudgets[preferences.detail]) step *= 2;
-    bool structuresVisible = view.structures && !target.empty() && tileCount(1024) <= 25;
-    Json request = {{"action","map"},{"dimension",dimension},{"y",view.y},{"step",step},{"minX",minX},{"minZ",minZ},{"maxX",maxX},{"maxZ",maxZ},{"target",view.structures ? target : ""},{"cityFilter",cityFilter}};
+    bool structuresVisible = view.structures && !target.empty();
+    Json request = {{"action","map"},{"dimension",dimension},{"y",view.y},{"step",step},{"minX",minX},{"minZ",minZ},{"maxX",maxX},{"maxZ",maxZ},{"target",view.structures ? target : ""},{"cityFilter",cityFilter},{"relief",preferences.relief}};
     Json key = request;
     for (const char *name : {"minX", "minZ", "maxX", "maxZ"}) key[name] = static_cast<int>(std::floor(request[name].get<double>() / (step * 32)));
     key["structureBounds"] = {static_cast<int>(std::floor(minX / 1024.0)),static_cast<int>(std::floor(minZ / 1024.0)),static_cast<int>(std::floor(maxX / 1024.0)),static_cast<int>(std::floor(maxZ / 1024.0))};
@@ -272,20 +309,37 @@ static void mapPanel(Json &command) {
         int tileX = tile.x * drawnStep * 32, tileZ = tile.z * drawnStep * 32;
         if (tileX > maxX || tileZ > maxZ || tileX + drawnStep * 32 < minX || tileZ + drawnStep * 32 < minZ) continue;
         if (hovered && mouseX >= tileX && mouseX < tileX + drawnStep * 32 && mouseZ >= tileZ && mouseZ < tileZ + drawnStep * 32) biome = tile.cells[static_cast<int>((mouseZ - tileZ) / drawnStep) * 32 + static_cast<int>((mouseX - tileX) / drawnStep)];
-        for (int row = 0; row < 32; row++) {
-            for (int col = 0; col < 32;) {
-                int value = tile.cells[row * 32 + col], last = col + 1;
-                while (last < 32 && tile.cells[row * 32 + last] == value) last++;
-                ImVec2 a = point(tileX + col * drawnStep, tileZ + row * drawnStep), b = point(tileX + last * drawnStep, tileZ + (row + 1) * drawnStep);
-                if (b.x >= start.x && a.x <= end.x && b.y >= start.y && a.y <= end.y) {
-                    draw->AddRectFilled({std::floor(a.x),std::floor(a.y)}, {std::floor(b.x),std::floor(b.y)}, biomeColors[value]);
-                    ImVec2 clippedA{std::max(a.x,start.x),std::max(a.y,start.y)}, clippedB{std::min(b.x,end.x),std::min(b.y,end.y)};
-                    view.areas[value] += (clippedB.x - clippedA.x) * (clippedB.y - clippedA.y);
-                    ImVec2 anchor{(clippedA.x + clippedB.x) / 2,(clippedA.y + clippedB.y) / 2};
-                    float distance = std::hypot(anchor.x - middle.x,anchor.y - middle.y);
-                    if (distance < biomeDistances[value]) { biomeDistances[value] = distance; biomeAnchors[value] = anchor; }
-                }
-                col = last;
+        const auto &spans = preferences.relief ? tile.relief : tile.flat;
+        draw->PrimReserve(static_cast<int>(spans.size()) * 6,static_cast<int>(spans.size()) * 4);
+        int rendered = 0;
+        for (const auto &span : spans) {
+            int row = span.start / 32, col = span.start % 32, value = span.biome;
+            ImVec2 a = point(tileX + col * drawnStep,tileZ + row * drawnStep), b = point(tileX + (col + span.count) * drawnStep,tileZ + (row + 1) * drawnStep);
+            if (b.x < start.x || a.x > end.x || b.y < start.y || a.y > end.y) continue;
+            ImU32 tint = biomeColors[value];
+            if (preferences.relief) {
+                int shade = span.shade;
+                tint = IM_COL32(std::min(255,static_cast<int>((tint & 255) * shade / 128)),std::min(255,static_cast<int>(((tint >> 8) & 255) * shade / 128)),std::min(255,static_cast<int>(((tint >> 16) & 255) * shade / 128)),255);
+            }
+            draw->PrimRect({std::floor(a.x),std::floor(a.y)},{std::floor(b.x),std::floor(b.y)},tint);
+            rendered++;
+            ImVec2 clippedA{std::max(a.x,start.x),std::max(a.y,start.y)}, clippedB{std::min(b.x,end.x),std::min(b.y,end.y)};
+            view.areas[value] += (clippedB.x - clippedA.x) * (clippedB.y - clippedA.y);
+            ImVec2 anchor{(clippedA.x + clippedB.x) / 2,(clippedA.y + clippedB.y) / 2};
+            float distanceX = anchor.x - middle.x, distanceY = anchor.y - middle.y;
+            float distance = distanceX * distanceX + distanceY * distanceY;
+            if (distance < biomeDistances[value]) { biomeDistances[value] = distance; biomeAnchors[value] = anchor; }
+        }
+        int unused = static_cast<int>(spans.size()) - rendered;
+        draw->PrimUnreserve(unused * 6,unused * 4);
+        if (preferences.coastlines && drawnStep / view.blocksPerPixel >= 1.5) {
+            auto water = [&](int value) { return view.water[value]; };
+            for (int row = 0; row < 32; row++) for (int col = 0; col < 32; col++) {
+                bool wet = water(tile.cells[row * 32 + col]);
+                ImVec2 at = point(tileX + col * drawnStep,tileZ + row * drawnStep);
+                ImVec2 next = point(tileX + (col + 1) * drawnStep,tileZ + (row + 1) * drawnStep);
+                if (col < 31 && wet != water(tile.cells[row * 32 + col + 1])) draw->AddLine({next.x,at.y},next,IM_COL32(33,57,64,105),uiScale);
+                if (row < 31 && wet != water(tile.cells[(row + 1) * 32 + col])) draw->AddLine({at.x,next.y},next,IM_COL32(33,57,64,105),uiScale);
             }
         }
     }
@@ -394,6 +448,8 @@ static void mapPanel(Json &command) {
         if (ImGui::SmallButton("Copy##map-selection")) command = {{"action","copy"},{"text",coordinatesOf(view.selected)}};
         ImGui::SameLine();
         if (ImGui::SmallButton("Center##map-selection")) { view.x = view.selected.value("x",0); view.z = view.selected.value("z",0); view.followPlayer = false; }
+        ImGui::SameLine();
+        if (ImGui::SmallButton("Track##map-selection")) command = {{"action","track"},{"name",view.selected.value("name","Waypoint")},{"x",view.selected.value("x",0)},{"z",view.selected.value("z",0)},{"dimension",dimension}};
         ImGui::SameLine(); ImGui::TextUnformatted(label(view.selected.value("name", "")).c_str());
         ImGui::TextDisabled("%s",coordinatesOf(view.selected).c_str());
         ImGui::EndChild();
@@ -406,7 +462,7 @@ static void mapPanel(Json &command) {
     if (!mapError.empty()) ImGui::TextWrapped("%s",mapError.c_str());
     else if (view.sentKey != desired || view.data.value("id", -1LL) != view.requestId) ImGui::TextDisabled("Loading map...");
     else if (view.data.value("remaining", 0) > 0) ImGui::TextDisabled("Loading %d tiles...   %d structures",view.data.value("remaining",0),visibleMarkers);
-    else if (view.structures && !structuresVisible) ImGui::TextDisabled("Zoom in for structure dots.");
+    else if (view.structures && view.data.value("overviewStructures",false)) ImGui::TextDisabled("%d nearest structures shown at this zoom",visibleMarkers);
     else ImGui::TextDisabled("%d structures   Biomes at Y %d", visibleMarkers, view.y);
     std::string mapWarning = view.data.value("warning", "");
     if (!mapWarning.empty()) ImGui::TextColored({1,0.71f,0.65f,1}, "%s", mapWarning.c_str());

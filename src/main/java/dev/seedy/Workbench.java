@@ -41,6 +41,9 @@ public final class Workbench implements AutoCloseable {
     private final AtomicLong searchGeneration = new AtomicLong();
     private final SeedMap seedMap = new SeedMap();
     private boolean mapVisible;
+    private int hudRevision;
+    private JsonObject trackedLocation;
+    private volatile Locator.SearchProgress locationProgress = new Locator.SearchProgress(0, 0, 0, false);
     private Future<?> search;
     private Locator locator;
     private Map<String, PlacementRule> rules = Map.of();
@@ -56,6 +59,7 @@ public final class Workbench implements AutoCloseable {
     private String searchKind = "";
     private volatile String error = "";
     private volatile String snapshot = "{}";
+    private volatile String hudSnapshot = "{}";
     private Long hash;
     private String seed;
     private volatile boolean verified;
@@ -89,8 +93,17 @@ public final class Workbench implements AutoCloseable {
 
     public boolean collecting() { return collecting; }
     public boolean hasVerifiedSeed() { return verified; }
+    public boolean hudEnabled() { return connected && uiSettings.get("hudEnabled").getAsBoolean(); }
+    public void toggleHud() {
+        uiSettings.addProperty("hudEnabled", !uiSettings.get("hudEnabled").getAsBoolean());
+        hudRevision++;
+        try { if (uiStore != null) uiSettings = uiStore.save(uiSettings); }
+        catch (java.io.IOException failure) { error = "Overlay settings could not be saved"; }
+        publish(Minecraft.getInstance());
+    }
     public boolean structureRecoveryRunning() { return recovery.running(); }
     public String snapshot() { return snapshot; }
+    public String hudSnapshot() { return hudSnapshot; }
     public void refresh() { publish(Minecraft.getInstance()); }
     public void stopMap() { mapVisible = false; seedMap.stop(); }
 
@@ -100,6 +113,7 @@ public final class Workbench implements AutoCloseable {
         seedMap.reset();
         connected = seedHash != null;
         hash = seedHash;
+        trackedLocation = null;
         seed = null;
         verified = false;
         observations.clear();
@@ -172,7 +186,11 @@ public final class Workbench implements AutoCloseable {
     }
 
     private boolean anyRecoveryRunning() {
-        return recovery.running() || BedrockRecovery.INSTANCE.running() || NetherBedrockRecovery.INSTANCE.running();
+        return recovery.running() || paperRecovery.running() || BedrockRecovery.INSTANCE.running() || NetherBedrockRecovery.INSTANCE.running();
+    }
+
+    private void requireIdleRecovery() {
+        if (anyRecoveryRunning()) throw new IllegalArgumentException("Wait for the current seed search to stop.");
     }
 
     private String recoverySource() {
@@ -232,13 +250,14 @@ public final class Workbench implements AutoCloseable {
                 case "collect" -> { collecting = !collecting; if (collecting) SeedyClient.rescan(); }
                 case "outlines" -> LoadedObjects.lootEnabled = body.get("loot").getAsBoolean();
                 case "rescan" -> { SeedyClient.rescan(); collecting = true; }
-                case "tryBlockRecovery" -> BedrockRecovery.INSTANCE.tryCurrentData();
+                case "tryBlockRecovery" -> { requireIdleRecovery(); BedrockRecovery.INSTANCE.tryCurrentData(); }
                 case "stopBlockRecovery" -> BedrockRecovery.INSTANCE.stopSearch();
-                case "tryNetherRecovery" -> NetherBedrockRecovery.INSTANCE.tryCurrentData();
+                case "tryNetherRecovery" -> { requireIdleRecovery(); NetherBedrockRecovery.INSTANCE.tryCurrentData(); }
                 case "stopNetherRecovery" -> NetherBedrockRecovery.INSTANCE.stopSearch();
                 case "recover" -> startRecovery();
                 case "stopRecovery" -> {
                     recovery.cancel();
+                    paperRecovery.cancel();
                     if (BedrockRecovery.INSTANCE.running()) BedrockRecovery.INSTANCE.stopSearch();
                     if (NetherBedrockRecovery.INSTANCE.running()) NetherBedrockRecovery.INSTANCE.stopSearch();
                     revision++;
@@ -268,6 +287,7 @@ public final class Workbench implements AutoCloseable {
                     }
                 }
                 case "seed" -> {
+                    trackedLocation = null;
                     try { seed = Long.toString(Long.parseLong(body.get("seed").getAsString().trim())); }
                     catch (NumberFormatException e) { throw new IllegalArgumentException("Enter a whole number from -9223372036854775808 to 9223372036854775807."); }
                     verified = hash != null && SeedHash.hash(Long.parseLong(seed)) == hash;
@@ -277,7 +297,7 @@ public final class Workbench implements AutoCloseable {
                     seedMap.reset();
                     cancelSearch();
                 }
-                case "clearSeed" -> { seed = null; verified = false; paperSalts.clear(); paperRecovery.cancel(); revision++; seedMap.reset(); cancelSearch(); }
+                case "clearSeed" -> { trackedLocation = null; seed = null; verified = false; paperSalts.clear(); paperRecovery.cancel(); revision++; seedMap.reset(); cancelSearch(); }
                 case "map" -> {
                     if (seed == null) throw new IllegalArgumentException("Recover or enter a seed first.");
                     if (!generationVersion.equals(gameVersion)) throw new IllegalArgumentException("Use the matching 26.2 or 26.3 Seedy jar for the map in this world.");
@@ -286,10 +306,22 @@ public final class Workbench implements AutoCloseable {
                     String warning = "";
                     if (!target.isEmpty()) try { placementSalt = checkedPlacementSalt(target); }
                     catch (IllegalArgumentException conflict) { warning = conflict.getMessage(); }
-                    seedMap.request(new SeedMap.Request(body.get("id").getAsLong(), Long.parseLong(seed), body.get("dimension").getAsString(), body.get("y").getAsInt(), body.get("step").getAsInt(), body.get("minX").getAsInt(), body.get("minZ").getAsInt(), body.get("maxX").getAsInt(), body.get("maxZ").getAsInt(), target, body.get("cityFilter").getAsString(), placementSalt, warning.isEmpty(), warning));
+                    seedMap.request(new SeedMap.Request(body.get("id").getAsLong(), Long.parseLong(seed), body.get("dimension").getAsString(), body.get("y").getAsInt(), body.get("step").getAsInt(), body.get("minX").getAsInt(), body.get("minZ").getAsInt(), body.get("maxX").getAsInt(), body.get("maxZ").getAsInt(), target, body.get("cityFilter").getAsString(), placementSalt, warning.isEmpty(), warning, body.has("relief") && body.get("relief").getAsBoolean()));
                     mapVisible = true;
                 }
                 case "mapStop" -> stopMap();
+                case "track" -> {
+                    int x = body.get("x").getAsInt(), z = body.get("z").getAsInt();
+                    String dimension = body.get("dimension").getAsString();
+                    if (Math.abs((long)x) > 29_999_984 || Math.abs((long)z) > 29_999_984 || !List.of("overworld", "the_nether", "the_end").contains(dimension)) throw new IllegalArgumentException("Invalid waypoint");
+                    trackedLocation = new JsonObject();
+                    trackedLocation.addProperty("x", x); trackedLocation.addProperty("z", z);
+                    trackedLocation.addProperty("name", body.has("name") ? body.get("name").getAsString().substring(0, Math.min(100, body.get("name").getAsString().length())) : "Waypoint");
+                    trackedLocation.addProperty("dimension", dimension);
+                    uiSettings.addProperty("hudEnabled", true); hudRevision++;
+                    if (uiStore != null) uiSettings = uiStore.save(uiSettings);
+                }
+                case "clearWaypoint" -> trackedLocation = null;
                 case "observe" -> observe(body.get("structure").getAsString(), body.get("x").getAsInt(), body.get("z").getAsInt(), "Manual");
                 case "remove" -> { String id = body.get("id").getAsString(); observations.remove(id); excludedObservations.remove(id); revision++; recovery.cancel(); paperRecovery.cancel(); }
                 case "locate" -> locate(body);
@@ -333,10 +365,11 @@ public final class Workbench implements AutoCloseable {
         searchDimension = dimension;
         searchCityFilter = cityFilter;
         searchStatus = "Searching";
+        locationProgress = new Locator.SearchProgress(0, 0, 0, false);
         var activeSalts = Map.copyOf(paperSalts);
         search = searches.submit(() -> {
             try {
-                var found = locator.search(value, kind, target, x, y, z, radius, query, dimension, cityFilter, activeSalts);
+                var found = locator.search(value, kind, target, x, y, z, radius, query, dimension, cityFilter, activeSalts, progress -> { if (searchGeneration.get() == generation) locationProgress = progress; });
                 Minecraft.getInstance().execute(() -> {
                     if (searchGeneration.get() != generation) return;
                     results = found;
@@ -353,7 +386,7 @@ public final class Workbench implements AutoCloseable {
                         resultSummaries.add(summary);
                     }
                     LoadedObjects.predictions(found);
-                    searchStatus = "Complete";
+                    searchStatus = locationProgress.partial() ? "Work limit reached; showing confirmed matches. Narrow the search to continue." : "Complete";
                 });
             } catch (Exception e) {
                 Minecraft.getInstance().execute(() -> {
@@ -366,6 +399,7 @@ public final class Workbench implements AutoCloseable {
     }
 
     private void recoverPaperSalt(String kind) {
+        requireIdleRecovery();
         if (seed == null || !verified) throw new IllegalArgumentException("Verify the world seed before checking a Paper placement salt.");
         if (!generationVersion.equals(gameVersion)) throw new IllegalArgumentException("Use the matching 26.2 or 26.3 Seedy jar to check Paper placement.");
         var rule = rules.get(kind);
@@ -431,6 +465,22 @@ public final class Workbench implements AutoCloseable {
         var state = new JsonObject();
         state.addProperty("seed", seed == null ? "" : seed);
         state.add("uiSettings", uiSettings);
+        state.addProperty("hudRevision", hudRevision);
+        state.addProperty("searchChecked", locationProgress.checked());
+        state.addProperty("searchFound", locationProgress.found());
+        state.addProperty("searchRange", locationProgress.range());
+        state.addProperty("fps", client.getFps());
+        if (client.level != null && client.player != null) {
+            state.addProperty("biome", client.level.getBiome(client.player.blockPosition()).unwrapKey().map(key -> key.identifier().toString()).orElse("Unknown"));
+            state.addProperty("yaw", client.player.getYRot());
+        }
+        if (trackedLocation != null) state.add("waypoint", trackedLocation.deepCopy());
+        else if (uiSettings.get("hudAutoTarget").getAsBoolean() && client.player != null && client.level != null) {
+            String dimension = client.level.dimension().identifier().getPath();
+            results.stream().filter(result -> result.dimension().equals(dimension)).min(java.util.Comparator.comparingDouble(result -> Math.hypot((long)result.x() - client.player.getBlockX(), (long)result.z() - client.player.getBlockZ()))).ifPresent(result -> {
+                var target = new JsonObject(); target.addProperty("name",result.name()); target.addProperty("x",result.x()); target.addProperty("z",result.z()); target.addProperty("dimension",result.dimension()); state.add("waypoint",target);
+            });
+        }
         state.addProperty("verified", verified);
         state.addProperty("connected", connected);
         state.addProperty("collecting", collecting);
@@ -543,6 +593,11 @@ public final class Workbench implements AutoCloseable {
         state.add("structures", JSON.toJsonTree(catalog == null ? List.of() : catalog.structures()));
         state.add("biomes", JSON.toJsonTree(catalog == null ? List.of() : catalog.biomes()));
         state.add("recoveryTypes", JSON.toJsonTree(rules.keySet().stream().sorted().toList()));
+        var hud = new JsonObject();
+        for (String key : new String[]{"connected","seed","verified","uiSettings","hudRevision","x","y","z","yaw","biome","dimension","fps","waypoint","recovering","recoveryStatus","progress","patternRunning","patternStatus","patternProgress","patternElapsedSeconds","patternEvidenceChunks","patternRawBlocks","netherPatternRunning","netherPatternStatus","netherPatternProgress","paperRunning","paperStatus","paperProgress","searchStatus","searchChecked"}) {
+            if (state.has(key)) hud.add(key,state.get(key));
+        }
+        hudSnapshot = JSON.toJson(hud);
         snapshot = JSON.toJson(state);
     }
 

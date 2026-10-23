@@ -28,6 +28,7 @@ public final class OverlayScreen extends Screen {
     @Override public boolean mouseScrolled(double x, double y, double horizontal, double vertical) { NativeGui.event(2, horizontal, vertical, 0); return true; }
     @Override public boolean charTyped(CharacterEvent event) { NativeGui.event(4, event.codepoint(), 0, 0); return true; }
     @Override public boolean keyPressed(KeyEvent event) {
+        if (SeedyClient.matchesHudToggle(event)) { Workbench.INSTANCE.toggleHud(); return true; }
         if (event.key() == InputConstants.KEY_ESCAPE || SeedyClient.matchesToggle(event)) { onClose(); return true; }
         modifiers(event.modifiers());
         NativeGui.event(3, mapKey(event.key()), 1, 0);

@@ -45,6 +45,12 @@ final class WorldgenAdapter {
         return new Locator.StructureWorld(dimension, placements, generator, height, biomes);
     }
 
+    static Locator.BiomeSampler mapBiomes(Locator.StructureWorld world, long seed) {
+        var resolver = world.generator().getBiomeSource().createResolver(world.placements().randomState().createClimateSampler(SamplerContext.EMPTY_UNCACHED));
+        var manager = new net.minecraft.world.level.biome.BiomeManager(resolver, net.minecraft.world.level.biome.BiomeManager.obfuscateSeed(seed));
+        return (x, y, z) -> manager.getBiome(new net.minecraft.core.BlockPos(x, y, z)).unwrapKey().orElseThrow().identifier().toString();
+    }
+
     static net.minecraft.server.packs.resources.MultiPackResourceManager resources() {
         return new net.minecraft.server.packs.resources.MultiPackResourceManager(net.minecraft.server.packs.PackType.SERVER_DATA, java.util.List.of(net.minecraft.server.packs.repository.ServerPacksSource.createVanillaPackSource().fullResources()));
     }

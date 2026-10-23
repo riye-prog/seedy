@@ -36,4 +36,21 @@ class UiSettingsTest {
         assertThrows(java.io.IOException.class,() -> new UiSettings(file).load());
         assertEquals("unfinished settings",Files.readString(file));
     }
+
+    @Test void overlayPreferencesSurviveRestartAndRejectInvalidSizes() throws Exception {
+        var store = new UiSettings(directory.resolve("ui.json"));
+        var input = new JsonObject();
+        input.addProperty("hudEnabled",true); input.addProperty("hudBiome",false);
+        input.addProperty("hudScale",100); input.addProperty("hudOpacity",-1);
+        input.addProperty("hudAnchor",4); input.addProperty("hudX",0.6); input.addProperty("hudY",0.2);
+        var result = store.save(input);
+        assertEquals(result,new UiSettings(directory.resolve("ui.json")).load());
+        assertTrue(result.get("hudEnabled").getAsBoolean());
+        assertFalse(result.get("hudBiome").getAsBoolean());
+        assertEquals(1.6,result.get("hudScale").getAsDouble());
+        assertEquals(0.2,result.get("hudOpacity").getAsDouble());
+        assertEquals(4,result.get("hudAnchor").getAsInt());
+        assertEquals(0.6,result.get("hudX").getAsDouble());
+        assertFalse(UiSettings.normalize(new JsonObject()).get("hudSeed").getAsBoolean());
+    }
 }

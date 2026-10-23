@@ -1,6 +1,9 @@
 #include "java_helper.h"
 #include "ore_validation.h"
 #include <algorithm>
+#include <atomic>
+#include <chrono>
+#include "cancellation.h"
 #include <cstdint>
 #include <jni.h>
 #ifdef _OPENMP
@@ -66,7 +69,7 @@ bool matchesWorldSeed(uint64_t seed) {
     return result;
 }
 
-bool shouldContinueSearch() {
+static bool readContinuation() {
     bool attached = false;
     JNIEnv *env = environment(attached);
     if (env == nullptr) return false;
@@ -78,6 +81,39 @@ bool shouldContinueSearch() {
     }
     if (attached) javaVm->DetachCurrentThread();
     return result;
+}
+
+static std::atomic<bool> continuation{false};
+static std::atomic<bool> monitoring{false};
+static std::thread cancellationMonitor;
+static std::atomic<bool> monitorStopped{true};
+
+void startRecoveryCancellation() {
+    continuation.store(readContinuation(), std::memory_order_relaxed);
+    try {
+        monitoring.store(true, std::memory_order_release);
+        monitorStopped.store(false, std::memory_order_relaxed);
+        cancellationMonitor = std::thread([] {
+            while (!monitorStopped.load(std::memory_order_relaxed) && continuation.load(std::memory_order_relaxed)) {
+                std::this_thread::sleep_for(std::chrono::milliseconds(20));
+                if (!readContinuation()) continuation.store(false, std::memory_order_relaxed);
+            }
+        });
+    } catch (const std::system_error&) {
+        monitoring.store(false, std::memory_order_release);
+    }
+}
+
+void stopRecoveryCancellation() {
+    if (cancellationMonitor.joinable()) {
+        monitorStopped.store(true, std::memory_order_relaxed);
+        cancellationMonitor.join();
+    }
+    monitoring.store(false, std::memory_order_release);
+}
+
+bool shouldContinueSearch() {
+    return monitoring.load(std::memory_order_acquire) ? continuation.load(std::memory_order_relaxed) : readContinuation();
 }
 
 static void addArgument(JNIEnv *env, jobjectArray values, int index, uint64_t value, jclass longClass, jmethodID valueOf) {

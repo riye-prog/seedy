@@ -12,6 +12,21 @@ import static org.junit.jupiter.api.Assertions.*;
 class LocatorRegressionTest {
     @BeforeAll static void bootstrap() { SharedConstants.tryDetectVersion(); Bootstrap.bootStrap(); }
 
+    @Test void millionBlockSearchFindsConfirmedStrongholdsBeyondTheOldRadius() {
+        assertTimeoutPreemptively(java.time.Duration.ofSeconds(90), () -> {
+            try (var locator = new Locator()) {
+                var progress = new java.util.ArrayList<Locator.SearchProgress>();
+                var results = locator.search(42,"structure","minecraft:strongholds",0,64,0,Locator.MAX_RADIUS,LootQuery.NONE,"overworld","any",java.util.Map.of(),progress::add);
+                assertTrue(results.size() >= 100);
+                assertTrue(results.stream().anyMatch(result -> result.distance() > 8192));
+                assertTrue(results.stream().allMatch(result -> result.confidence().contains("portal room")));
+                for (int index = 1; index < results.size(); index++) assertTrue(results.get(index).distance() >= results.get(index - 1).distance());
+                assertFalse(progress.getLast().partial());
+                System.out.println("Wide search confirmed strongholds=" + results.size() + " farthest=" + results.getLast().distance());
+            }
+        });
+    }
+
     @Test void reportedAncientCityCandidatesMustPassActualVanillaGeneration() {
         long seed = 2589511696370800371L;
         var registries = WorldgenAdapter.registries();

@@ -1,0 +1,1 @@
+nether bedrock cracking engine from [19misterx98/nether_bedrock_cracker](https://github.com/19MisterX98/Nether_Bedrock_Cracker), revision `74da51b969ece1aa126ae9f7c62faf9541f43f11`, under lgpl-3.0. seedy adds cancellation checks between root batches so stopping a check also stops its workers. the original license is included here.

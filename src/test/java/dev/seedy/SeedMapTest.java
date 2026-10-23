@@ -21,10 +21,10 @@ class SeedMapTest {
         assertThrows(IllegalArgumentException.class, () -> new SeedMap.Request(1,1,"overworld",64,4,-20000,-20000,20000,20000,"","any"));
         assertThrows(IllegalArgumentException.class, () -> new SeedMap.Request(1,1,"overworld",64,3,0,0,127,127,"","any"));
         assertThrows(IllegalArgumentException.class, () -> new SeedMap.Request(1,1,"overworld",64,4,Integer.MIN_VALUE,0,0,0,"","any"));
-        assertFalse(new SeedMap.Request(1,1,"overworld",64,64,-4096,-4096,4096,4096,"minecraft:ancient_cities","any").showStructures());
+        assertTrue(new SeedMap.Request(1,1,"overworld",64,64,-4096,-4096,4096,4096,"minecraft:ancient_cities","any").showStructures());
         assertFalse(new SeedMap.Request(1,1,"overworld",64,16,0,0,1023,1023,"minecraft:ancient_cities","any",null,false,"Placement differs").showStructures());
         assertDoesNotThrow(() -> new SeedMap.Request(1,1,"overworld",64,4,0,0,2047,2047,"","any"));
-        assertThrows(IllegalArgumentException.class,() -> new SeedMap.Request(1,1,"overworld",64,4,0,0,2048,2047,"","any"));
+        assertThrows(IllegalArgumentException.class,() -> new SeedMap.Request(1,1,"overworld",64,4,0,0,4096,2047,"","any"));
     }
 
     @Test void runEncodingPreservesCellsAtNegativeTileBoundaries() {
@@ -144,6 +144,27 @@ class SeedMapTest {
             }
             assertTrue(found > 0);
         }
+    }
+
+    @Test void blockDetailAndTerrainShadingUseVanillaGeneration() {
+        assertTimeoutPreemptively(Duration.ofSeconds(90), () -> {
+            try (var map = new SeedMap(); var locator = new Locator()) {
+                long started = System.nanoTime();
+                map.request(new SeedMap.Request(400,42,"overworld",64,1,-32,-32,31,31,"","any",null,true,"",true));
+                var snapshot = await(map,400);
+                for (var element : snapshot.getAsJsonArray("tiles")) {
+                    var tile = element.getAsJsonObject();
+                    assertEquals(49,tile.getAsJsonArray("heights").size());
+                    int x = tile.get("x").getAsInt() * 32, z = tile.get("z").getAsInt() * 32;
+                    assertEquals(locator.mapHeight(42,x - 8,z - 8),tile.getAsJsonArray("heights").get(0).getAsInt());
+                }
+                System.out.println("Block-detail shaded map ms=" + (System.nanoTime() - started) / 1_000_000);
+                map.request(new SeedMap.Request(401,2589511696370800371L,"overworld",64,4,-2048,-1024,2047,1023,"minecraft:villages","any",null,true,"",true));
+                var preview = await(map,401);
+                java.nio.file.Files.writeString(java.nio.file.Path.of("build/seed-map-shaded-preview.json"),preview.toString());
+                System.out.println("Shaded viewport total ms=" + (System.nanoTime() - started) / 1_000_000);
+            }
+        });
     }
 
     private static JsonObject await(SeedMap map, long id) throws InterruptedException {

@@ -18,15 +18,17 @@ import static net.fabricmc.fabric.api.client.command.v2.ClientCommands.literal;
 public final class SeedyClient implements ClientModInitializer {
     private static final ObservationCollector COLLECTOR = new ObservationCollector();
     private static Long sessionHash;
-    private static KeyMapping toggle;
+    private static KeyMapping toggle, hudToggle;
     private static int smokeTicks;
     private static boolean smokeOpened;
     public static boolean matchesToggle(KeyEvent event) { return toggle != null && toggle.matches(event); }
     public static boolean matchesToggle(MouseButtonEvent event) { return toggle != null && toggle.matchesMouse(event); }
+    public static boolean matchesHudToggle(KeyEvent event) { return hudToggle != null && hudToggle.matches(event); }
     public static void rescan() { COLLECTOR.rescan(); BedrockRecovery.INSTANCE.rescan(); }
     public static int pendingChunks() { return COLLECTOR.pending(); }
     @Override public void onInitializeClient() {
         toggle = KeyMappingHelper.registerKeyMapping(new KeyMapping("key.seedy.toggle", InputConstants.KEY_F8, KeyMapping.Category.register(Identifier.fromNamespaceAndPath("seedy", "controls"))));
+        hudToggle = KeyMappingHelper.registerKeyMapping(new KeyMapping("key.seedy.hud", InputConstants.KEY_F9, KeyMapping.Category.register(Identifier.fromNamespaceAndPath("seedy", "controls"))));
         ClientCommandRegistrationCallback.EVENT.register((dispatcher, registry) -> dispatcher.register(literal("seedy").executes(context -> {
             Minecraft.getInstance().execute(() -> Minecraft.getInstance().gui.setScreen(new OverlayScreen()));
             return 1;
@@ -54,6 +56,7 @@ public final class SeedyClient implements ClientModInitializer {
                 if (client.gui.screen() instanceof OverlayScreen) client.gui.setScreen(null);
                 else if (client.gui.screen() == null && client.level != null) client.gui.setScreen(new OverlayScreen());
             }
+            while (hudToggle.consumeClick()) if (client.level != null) Workbench.INSTANCE.toggleHud();
             if (client.level != null) COLLECTOR.tick(client.level, Workbench.INSTANCE);
             Workbench.INSTANCE.tick(client);
             BedrockRecovery.INSTANCE.tick(client);

@@ -198,7 +198,7 @@ static void dataTableHeadersRow() {
 
 static void recoveryPanel(Json &command) {
     sectionHeading("Seed recovery", "Collect loaded chunks, then recover the seed. Evidence is selected automatically.");
-    bool running = state.value("recovering", false) || state.value("patternRunning", false) || state.value("netherPatternRunning", false);
+    bool running = state.value("recovering", false) || state.value("patternRunning", false) || state.value("netherPatternRunning", false) || state.value("paperRunning", false);
     auto observations = state.value("observations", Json::array());
     if (!state.value("connected", false)) ImGui::TextDisabled("Join a world to collect observations.");
     std::string generationVersion = state.value("generationVersion", state.value("gameVersion", "26.2"));
@@ -273,7 +273,7 @@ static void recoveryPanel(Json &command) {
         int passes = state.value("patternPass", 0);
         ImGui::TextDisabled("Last check: %s  ·  %d %s", timeLabel(state.value("patternElapsedSeconds", 0L)).c_str(), passes, passes == 1 ? "pass" : "passes");
     }
-    ImGui::BeginDisabled(!state.value("patternCanTry", false));
+    ImGui::BeginDisabled(running || !state.value("patternCanTry", false));
     if (ImGui::Button("Try current data")) command = {{"action", "tryBlockRecovery"}};
     ImGui::EndDisabled();
     if (blockRunning) {
@@ -294,7 +294,7 @@ static void recoveryPanel(Json &command) {
         if (netherProgress >= 0) ImGui::ProgressBar(static_cast<float>(netherProgress), {-1, 7 * uiScale}, "");
         if (ImGui::Button("Stop Nether check")) command = {{"action", "stopNetherRecovery"}};
     } else {
-        ImGui::BeginDisabled(!state.value("netherPatternCanTry", false));
+        ImGui::BeginDisabled(running || !state.value("netherPatternCanTry", false));
         if (ImGui::Button("Check Nether data")) command = {{"action", "tryNetherRecovery"}};
         ImGui::EndDisabled();
     }
@@ -382,7 +382,7 @@ static void recoveryPanel(Json &command) {
     ImGui::SetNextItemWidth(250 * uiScale);
     std::string paperStructure = select("Structure##paper", "paperTypes", paperType);
     bool paperRunning = state.value("paperRunning", false);
-    ImGui::BeginDisabled(paperRunning || !state.value("verified", false) || paperStructure.empty() || !versionMatches);
+    ImGui::BeginDisabled(running || !state.value("verified", false) || paperStructure.empty() || !versionMatches);
     if (ImGui::Button("Find placement salt")) command = {{"action", "recoverPaperSalt"}, {"structure", paperStructure}};
     ImGui::EndDisabled();
     if (paperRunning) {
@@ -440,7 +440,7 @@ static void chestDetails(const Json &entry, Json &command) {
 
 static void locatePanel(Json &command) {
     sectionHeading("Find a location", "Search structures, biomes and chest loot in any dimension.");
-    static int kind = 0, target = 0, origin[3] = {0,64,0}, radius = 2048, dimensionIndex = 0, cityFilter = 0;
+    static int kind = 0, target = 0, origin[3] = {0,64,0}, radius = 32768, dimensionIndex = 0, cityFilter = 0;
     const char *dimensions[] = {"overworld", "the_nether", "the_end"};
     const char *dimensionNames[] = {"Overworld", "Nether", "End"};
     ImGui::SetNextItemWidth(245 * uiScale);
@@ -464,7 +464,10 @@ static void locatePanel(Json &command) {
     ImGui::EndDisabled();
     if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled) && state.value("dimension", "overworld") != dimension) ImGui::SetTooltip("Enter coordinates in the selected dimension. Coordinates are not portal-scaled.");
     ImGui::SetNextItemWidth(245 * uiScale);
-    if (ImGui::SliderInt("Radius", &radius, 128, 8192, "%d blocks")) command = {{"action","cancelSearch"}};
+    if (ImGui::SliderInt("Radius", &radius, 128, 1048576, "%d blocks", ImGuiSliderFlags_Logarithmic)) command = {{"action","cancelSearch"}};
+    const int ranges[] = {8192,32768,131072,524288,1048576};
+    const char *rangeNames[] = {"8k", "32k", "128k", "512k", "1m"};
+    for (int i = 0; i < 5; i++) { if (i) ImGui::SameLine(); if (compactButton(rangeNames[i])) { radius = ranges[i]; command = {{"action","cancelSearch"}}; } }
     const char *cityFilters[] = {"any", "with_elytra", "without_elytra"};
     bool isEndCity = kind == 0 && selected == "minecraft:end_cities";
     if (isEndCity) {
@@ -513,8 +516,9 @@ static void locatePanel(Json &command) {
     ImGui::SameLine();
     if (running && ImGui::Button("Cancel")) command = {{"action","cancelSearch"}};
     else ImGui::TextDisabled("%s", state.value("searchStatus", "Idle").c_str());
+    if (running) ImGui::TextDisabled("%d candidates checked   %d matches   %d blocks searched",state.value("searchChecked",0),state.value("searchFound",0),state.value("searchRange",0));
     ImGui::PushStyleColor(ImGuiCol_Text, ImGui::GetStyleColorVec4(ImGuiCol_TextDisabled));
-    ImGui::TextWrapped(kind == 0 ? "Generated with this version's world rules. Paper settings can change placements; check Recovery for conflicts." : "Vanilla biomes in the selected dimension at the selected Y, sampled every 64 blocks.");
+    ImGui::TextWrapped(kind == 0 ? "Generated with this version's world rules. Paper settings can change placements; check Recovery for conflicts." : "Vanilla biomes in the selected dimension at the selected Y, sampled every 64 blocks nearby; wider searches adapt the sampling.");
     ImGui::PopStyleColor();
     auto results = state.value("results", Json::array());
     if (state.value("searchDimension", "overworld") != dimension || state.value("searchCityFilter", "any") != selectedCityFilter || state.value("searchTarget", "") != selected || state.value("searchKind", "") != (kind == 0 ? "structure" : "biome") || command.value("action", "") == "cancelSearch") results = Json::array();
@@ -558,6 +562,7 @@ static void locatePanel(Json &command) {
             ImGui::BeginDisabled(exists || !state.value("connected", false));
             if (compactButton(exists ? "Saved" : "Save")) command = {{"action","pin"},{"index",i},{"generation",state.value("searchGeneration",0LL)}};
             ImGui::EndDisabled();
+            if (compactButton("Track")) command = {{"action","track"},{"name",entry.value("name","")},{"x",entry.value("x",0)},{"z",entry.value("z",0)},{"dimension",entry.value("dimension","overworld")}};
             ImGui::PopID();
         }
         ImGui::PopStyleVar();
@@ -598,6 +603,7 @@ static void savedPanel(Json &command) {
 
 #include "ui_settings.h"
 #include "seed_map.h"
+#include "gameplay_hud.h"
 
 static void drawOutlines(const std::vector<double> &lines) {
     auto draw = ImGui::GetBackgroundDrawList();
@@ -733,13 +739,14 @@ static Json drawPanel(int width, int height) {
         if (!state.value("seed", "").empty()) { ImGui::SameLine(); ImGui::TextDisabled("%s", state.value("verified", false) ? "Seed verified" : "Manual seed"); }
     }
     ImGui::End();
+    if (state.value("clearHudWaypoint",false)) { state.erase("clearHudWaypoint"); command = {{"action","clearWaypoint"}}; }
     if (stopMap) command["stopMap"] = true;
     persistPreferences(command);
     return command;
 }
 
 #ifndef SEEDY_HEADLESS_TEST
-extern "C" JNIEXPORT jstring JNICALL Java_dev_seedy_NativeGui_frame(JNIEnv *env, jclass type, jstring snapshot, jint width, jint height, jfloat density, jdoubleArray events, jlongArray graphics, jdoubleArray outlineLines, jboolean panel) {
+extern "C" JNIEXPORT jstring JNICALL Java_dev_seedy_NativeGui_frame(JNIEnv *env, jclass type, jstring snapshot, jint width, jint height, jfloat density, jdoubleArray events, jlongArray graphics, jdoubleArray outlineLines, jboolean panel, jboolean hud) {
     try {
         frameEnvironment = env;
         if (!context) initialize(env, type, density);
@@ -774,7 +781,9 @@ extern "C" JNIEXPORT jstring JNICALL Java_dev_seedy_NativeGui_frame(JNIEnv *env,
         std::vector<double> lines(lineCount);
         env->GetDoubleArrayRegion(outlineLines, 0, lineCount, lines.data());
         drawOutlines(lines);
+        loadPreferences();
         Json command = panel ? drawPanel(width, height) : Json::object();
+        if (hud || panel && hudEditing) drawGameplayHud(width, height, panel && hudEditing);
         if (!panel && preferencesLoaded) persistPreferences(command,true);
         ImGui::Render();
         VulkanRenderer::render(ImGui::GetDrawData(), handles, width, height);

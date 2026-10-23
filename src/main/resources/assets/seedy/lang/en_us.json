@@ -1,4 +1,5 @@
 {
   "key.seedy.toggle": "Toggle Seedy",
-  "key.category.seedy.controls": "Seedy"
+  "key.category.seedy.controls": "Seedy",
+  "key.seedy.hud": "Toggle Seedy overlay"
 }

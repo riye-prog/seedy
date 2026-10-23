@@ -129,6 +129,42 @@ class RecoveryTest {
         }
     }
 
+    @Test void cancellationStopsWorkersAndDoesNotRestart() throws Exception {
+        var rule = new PlacementRule("minecraft:desert_pyramids",32,8,14357617,false);
+        var observations = new ArrayList<Observation>();
+        for (int region = 0; region < 6; region++) {
+            var start = rule.chunk(42,region,-region);
+            observations.add(Observation.create(rule,start[0],start[1],"Test"));
+        }
+        var callbacks = new AtomicLong();
+        try (var engine = new RecoveryEngine()) {
+            assertFalse(engine.running());
+            for (int attempt = 0; attempt < 3; attempt++) {
+                engine.start(observations,SeedHash.hash(9),ignored -> callbacks.incrementAndGet());
+                Thread.sleep(20);
+                engine.cancel();
+                long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(1);
+                while (engine.running() && System.nanoTime() < deadline) Thread.sleep(1);
+                assertFalse(engine.running(),engine.stage());
+                Thread.sleep(20);
+                assertFalse(engine.running());
+            }
+        }
+        try (var engine = new PaperSaltRecovery()) {
+            for (int attempt = 0; attempt < 3; attempt++) {
+                engine.start(42,rule,observations,ignored -> callbacks.incrementAndGet());
+                Thread.sleep(20);
+                engine.cancel();
+                long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(1);
+                while (engine.running() && System.nanoTime() < deadline) Thread.sleep(1);
+                assertFalse(engine.running(),engine.status());
+                Thread.sleep(20);
+                assertFalse(engine.running());
+            }
+        }
+        assertEquals(0,callbacks.get());
+    }
+
     @Test void rejectedRandomDrawsAreRecoveredOutsideTheLowerBitFilter() {
         var rule = new PlacementRule("minecraft:desert_pyramids",32,8,14357617,false);
         long rejectedState = (((1L << 31) - 1) << 17) | 23;

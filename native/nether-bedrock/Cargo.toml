@@ -8,5 +8,5 @@ name = "seedynether"
 crate-type = ["cdylib"]
 
 [dependencies]
-bedrock_cracker = { git = "https://github.com/19MisterX98/Nether_Bedrock_Cracker.git", rev = "74da51b969ece1aa126ae9f7c62faf9541f43f11" }
+bedrock_cracker = { path = "engine" }
 sha2 = "0.10.9"

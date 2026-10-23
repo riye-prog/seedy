@@ -34,6 +34,7 @@ public final class NetherBedrockRecovery implements AutoCloseable {
     private static volatile MethodHandle crackHandle;
     private static volatile MethodHandle progressHandle;
     private static volatile MethodHandle cancelHandle;
+    private static volatile MethodHandle resetHandle;
     private final ArrayDeque<ChunkPos> queue = new ArrayDeque<>();
     private final Set<Long> queued = new HashSet<>();
     private final Set<Long> scanned = new HashSet<>();
@@ -80,6 +81,7 @@ public final class NetherBedrockRecovery implements AutoCloseable {
     }
 
     public void tick(Minecraft client) {
+        if (!Workbench.INSTANCE.collecting()) return;
         if (expectedHash == null || client.level == null || !client.level.dimension().equals(Level.NETHER)) return;
         if (Workbench.INSTANCE.hasVerifiedSeed()) {
             if (running) cancelSearch();
@@ -150,7 +152,7 @@ public final class NetherBedrockRecovery implements AutoCloseable {
 
     private void startSearch() {
         int[] entries = Arrays.copyOf(observations, observationCount);
-        int runGeneration = generation;
+        int runGeneration = ++generation;
         Long hash = expectedHash;
         attemptedChunks = scanned.size();
         running = true;
@@ -160,8 +162,9 @@ public final class NetherBedrockRecovery implements AutoCloseable {
         WORKER.submit(() -> {
             try {
                 loadNative();
+                resetHandle.invokeExact();
                 if (cancelRequested || runGeneration != generation) return;
-                int threads = Math.max(1, Math.min(16, Runtime.getRuntime().availableProcessors()));
+                int threads = Math.max(1, Math.min(6, Runtime.getRuntime().availableProcessors() - 2));
                 try (Arena arena = Arena.ofConfined()) {
                     MemorySegment blocks = arena.allocate(ValueLayout.JAVA_INT, entries.length);
                     blocks.copyFrom(MemorySegment.ofArray(entries));
@@ -184,7 +187,7 @@ public final class NetherBedrockRecovery implements AutoCloseable {
                     else if (count == 1) {
                         long worldSeed = results.get(ValueLayout.JAVA_LONG, 0);
                         Minecraft.getInstance().execute(() -> {
-                            if (runGeneration == generation && Workbench.INSTANCE.acceptBlockSeed(worldSeed)) status = "Seed recovered from Nether bedrock";
+                            if (!cancelRequested && runGeneration == generation && Workbench.INSTANCE.acceptBlockSeed(worldSeed)) status = "Seed recovered from Nether bedrock";
                         });
                     }
                 }
@@ -192,6 +195,10 @@ public final class NetherBedrockRecovery implements AutoCloseable {
                 if (runGeneration == generation) status = "Nether block check failed: " + error.getClass().getSimpleName();
                 org.slf4j.LoggerFactory.getLogger("Seedy").error("Nether bedrock recovery failed", error);
             } finally {
+                if (cancelRequested && runGeneration == generation) {
+                    status = "Nether block check stopped";
+                    attemptedChunks = 0;
+                }
                 running = false;
             }
         });
@@ -209,6 +216,7 @@ public final class NetherBedrockRecovery implements AutoCloseable {
         crackHandle = linker.downcallHandle(symbols.findOrThrow("seedy_nether_crack"), FunctionDescriptor.of(ValueLayout.JAVA_LONG, ValueLayout.ADDRESS, ValueLayout.JAVA_LONG, ValueLayout.JAVA_LONG, ValueLayout.JAVA_LONG, ValueLayout.ADDRESS));
         progressHandle = linker.downcallHandle(symbols.findOrThrow("seedy_nether_progress"), FunctionDescriptor.of(ValueLayout.JAVA_LONG));
         cancelHandle = linker.downcallHandle(symbols.findOrThrow("seedy_nether_cancel"), FunctionDescriptor.ofVoid());
+        resetHandle = linker.downcallHandle(symbols.findOrThrow("seedy_nether_reset"), FunctionDescriptor.ofVoid());
     }
 
     private static void cancelNative() {

@@ -12,7 +12,7 @@ public final class NativeGui {
     private static boolean failed;
     private static boolean rendered;
     private static boolean vulkanSeen;
-    private static native String frame(String state, int width, int height, float density, double[] events, long[] graphics, double[] lines, boolean panel);
+    private static native String frame(String state, int width, int height, float density, double[] events, long[] graphics, double[] lines, boolean panel, boolean hud);
     private static native void dispose();
 
     public static void event(int kind, double a, double b, double c) {
@@ -31,13 +31,18 @@ public final class NativeGui {
     }
 
     public static boolean wantsFrame() {
-        return !failed && (Minecraft.getInstance().gui.screen() instanceof OverlayScreen || LoadedObjects.active() || loaded && !INPUT.isEmpty());
+        return !failed && (Minecraft.getInstance().gui.screen() instanceof OverlayScreen || hudVisible() || LoadedObjects.active() || loaded && !INPUT.isEmpty());
+    }
+
+    private static boolean hudVisible() {
+        var client = Minecraft.getInstance();
+        return client.level != null && client.gui.screen() == null && !client.gui.hud.isHidden() && Workbench.INSTANCE.hudEnabled();
     }
 
     public static void vulkanAvailable() { vulkanSeen = true; }
 
     public static void checkBackend() {
-        if (!vulkanSeen && !failed && Minecraft.getInstance().gui.screen() instanceof OverlayScreen) fail(new IllegalStateException("Select Vulkan in Minecraft's video settings and restart the game to use Seedy's panel."));
+        if (!vulkanSeen && !failed && (Minecraft.getInstance().gui.screen() instanceof OverlayScreen || hudVisible())) fail(new IllegalStateException("Select Vulkan in Minecraft's video settings and restart the game to use Seedy's panel."));
     }
 
     public static void render(long[] graphics, int width, int height) {
@@ -53,7 +58,7 @@ public final class NativeGui {
             while ((event = INPUT.poll()) != null) events.add(event);
             double[] packed = new double[events.size() * 4];
             for (int i = 0; i < events.size(); i++) System.arraycopy(events.get(i), 0, packed, i * 4, 4);
-            String action = frame(Workbench.INSTANCE.snapshot(), width, height, (float)width / Math.max(1, window.getScreenWidth()), packed, graphics, OutlineProjection.frame(width, height), panel);
+            String action = frame(panel ? Workbench.INSTANCE.snapshot() : Workbench.INSTANCE.hudSnapshot(), width, height, (float)width / Math.max(1, window.getScreenWidth()), packed, graphics, OutlineProjection.frame(width, height), panel, hudVisible());
             if (!rendered) {
                 rendered = true;
                 org.slf4j.LoggerFactory.getLogger("Seedy").info("Dear ImGui Vulkan overlay rendered inside Minecraft");

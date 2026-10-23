@@ -131,6 +131,7 @@ public final class BedrockRecovery implements AutoCloseable {
     }
 
     public void tick(Minecraft client) {
+        if (!Workbench.INSTANCE.collecting()) return;
         if (!connected || found || client.level == null || !client.level.dimension().equals(Level.OVERWORLD)) return;
         if (Workbench.INSTANCE.hasVerifiedSeed()) {
             status = "Seed already verified";
@@ -146,7 +147,7 @@ public final class BedrockRecovery implements AutoCloseable {
             }
         }
         long deadline = System.nanoTime() + 3_000_000;
-        while (!queue.isEmpty() && System.nanoTime() < deadline) {
+        while (!running && !queue.isEmpty() && System.nanoTime() < deadline) {
             ChunkPos position = queue.remove();
             queued.remove(position.pack());
             if (client.level.hasChunk(position.x(), position.z())) {
@@ -226,8 +227,14 @@ public final class BedrockRecovery implements AutoCloseable {
     }
 
     static long[] retainNearbyVeins(long[] entries) {
+        return retainNearbyVeins(entries, () -> true);
+    }
+
+    static long[] retainNearbyVeins(long[] entries, java.util.function.BooleanSupplier continuing) {
         Set<Long> nearby = new HashSet<>();
+        int index = 0;
         for (long entry : entries) {
+            if ((index++ & 4095) == 0 && !continuing.getAsBoolean()) throw new java.util.concurrent.CancellationException();
             if ((entry & 15) != 1) continue;
             int x = (int)(entry >> 38);
             int z = (int)(entry << 26 >> 38);
@@ -239,6 +246,7 @@ public final class BedrockRecovery implements AutoCloseable {
         long[] kept = new long[entries.length];
         int count = 0;
         for (long entry : entries) {
+            if ((count & 4095) == 0 && !continuing.getAsBoolean()) throw new java.util.concurrent.CancellationException();
             int type = (int)(entry & 15);
             if ((type == 2 || type == 3) && !nearby.contains(entry & ~15L)) continue;
             kept[count++] = entry;
@@ -269,6 +277,7 @@ public final class BedrockRecovery implements AutoCloseable {
     private static MemorySegment allocateEntries(long[] entries, Arena arena) {
         MemorySegment blocks = block_entry.allocateArray(entries.length, arena);
         for (int i = 0; i < entries.length; i++) {
+            if ((i & 4095) == 0 && !shouldContinueSearch()) throw new java.util.concurrent.CancellationException();
             long packed = entries[i];
             MemorySegment block = block_entry.asSlice(blocks, i);
             block_entry.x(block, (int)(packed >> 38));
@@ -287,7 +296,7 @@ public final class BedrockRecovery implements AutoCloseable {
         running = true;
         budget.start(System.nanoTime());
         status = "Cracking from loaded blocks";
-        int runGeneration = generation;
+        int runGeneration = ++generation;
         runningGeneration = runGeneration;
         cancelRequested = false;
         progress.start(2, System.nanoTime());
@@ -313,7 +322,8 @@ public final class BedrockRecovery implements AutoCloseable {
                 nativeFailure.remove();
                 nativeMatched = false;
                 loadNative();
-                long[] fullEntries = retainNearbyVeins(entries);
+                if (!shouldContinueSearch()) return;
+                long[] fullEntries = retainNearbyVeins(entries, BedrockRecovery::shouldContinueSearch);
                 oreVeinCheck = OreVeinCheck.fromEntries(fullEntries, generationVersion);
                 try (Arena arena = Arena.ofConfined()) {
                     MemorySegment blocks = allocateEntries(fullEntries, arena);
@@ -344,6 +354,8 @@ public final class BedrockRecovery implements AutoCloseable {
                     else if (nativeMatched) status = "Seed found; verifying";
                     else status = failure == null ? "No matching seed from this block sample" : failure;
                 }
+            } catch (java.util.concurrent.CancellationException ignored) {
+                if (generation == runGeneration) status = "Search stopped";
             } catch (Throwable error) {
                 if (generation == runGeneration) status = "Block-pattern search failed: " + error.getClass().getSimpleName();
                 LOGGER.error("Block-pattern recovery failed", error);
@@ -370,7 +382,7 @@ public final class BedrockRecovery implements AutoCloseable {
     public void tryCurrentData() {
         if (!connected || expectedHash == null) throw new IllegalArgumentException("Join a world first.");
         if (Workbench.INSTANCE.hasVerifiedSeed()) throw new IllegalArgumentException("The seed is already verified.");
-        if (running || !queue.isEmpty()) throw new IllegalArgumentException("Wait for loaded chunks to finish scanning.");
+        if (running || Workbench.INSTANCE.collecting() && !queue.isEmpty()) throw new IllegalArgumentException("Wait for loaded chunks to finish scanning.");
         if (hasConflictingRawData()) throw new IllegalArgumentException("Raw blocks appear outside vanilla vein heights across several chunks. Anti-xray, placed blocks, or custom generation may be changing this data.");
         if (attempted) throw new IllegalArgumentException("The loaded block sample was already checked. Load more chunks first.");
         if (evidenceChunks < MIN_EVIDENCE_CHUNKS || rawCount == 0) throw new IllegalArgumentException("There is not enough nearby block data to check yet.");
@@ -460,7 +472,7 @@ public final class BedrockRecovery implements AutoCloseable {
     public boolean hasConflictingRawData() { return conflictingRawCount >= 8 && conflictingRawChunks >= 4; }
     private record ChunkSample(long[] entries, int raw, int ore, int conflictingRaw) { }
     public double collectionProgress() { return rawCount == 0 ? 0 : Math.min(1, (double)evidenceChunks / MIN_EVIDENCE_CHUNKS); }
-    public boolean canTry() { return connected && !running && !attempted && queue.isEmpty() && evidenceChunks >= MIN_EVIDENCE_CHUNKS && rawCount > 0 && !hasConflictingRawData() && !Workbench.INSTANCE.hasVerifiedSeed(); }
+    public boolean canTry() { return connected && !running && !attempted && (!Workbench.INSTANCE.collecting() || queue.isEmpty()) && evidenceChunks >= MIN_EVIDENCE_CHUNKS && rawCount > 0 && !hasConflictingRawData() && !Workbench.INSTANCE.hasVerifiedSeed(); }
     public boolean running() { return running; }
     public BlockSearchProgress.View searchProgress() { return progress.view(System.nanoTime()); }
     public String status() { return running && !cancelRequested ? searchProgress().phase() : status; }

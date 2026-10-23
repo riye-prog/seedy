@@ -243,6 +243,19 @@ for number in range(1, 6):
     source = source.replace(event, event + "\n\tif (!shouldContinueSearch()) return;", 1)
 source = source.replace(old_scan, new_scan, 1)
 
+source = source.replace('#include "positional_candidates.h"', '#include "positional_candidates.h"\n#include "cancellation.h"', 1)
+for old, new in (
+    ("void bedrockseed$crack(int size, block_entry* entries, int mode)\n{", "void bedrockseed$crack(int size, block_entry* entries, int mode)\n{\n\tRecoveryCancellationSession cancellation;\n\tif (!shouldContinueSearch()) return;"),
+    ("\tfor(uint64_t entry_idx = 0; entry_idx < size; ++entry_idx) {", "\tfor(uint64_t entry_idx = 0; entry_idx < size; ++entry_idx) {\n\t\tif ((entry_idx & 4095) == 0 && !shouldContinueSearch()) return;"),
+    ("\tfor(auto[coord, typ] : blocks) {", "\tsize_t classificationIndex = 0;\n\tfor(auto[coord, typ] : blocks) {\n\t\tif ((classificationIndex++ & 4095) == 0 && !shouldContinueSearch()) return;"),
+    ("\tfor(auto[x,y,z] : maybe_veins) {", "\tfor(auto[x,y,z] : maybe_veins) {\n\t\tif (!shouldContinueSearch()) return;"),
+    ("\t\tfor(beam_entry& to : next) {", "\t\tfor(beam_entry& to : next) {\n\t\t\tif (!shouldContinueSearch()) continue;"),
+    ("\t\tstd::ranges::stable_sort(next.begin()", "\t\tif (!shouldContinueSearch()) return {};\n\t\tstd::ranges::stable_sort(next.begin()"),
+):
+    if source.count(old) != 1:
+        raise SystemExit("unexpected cancellation anchor: " + old)
+    source = source.replace(old, new, 1)
+
 output.parent.mkdir(parents=True, exist_ok=True)
 if not output.exists() or output.read_text() != source:
     output.write_text(source)

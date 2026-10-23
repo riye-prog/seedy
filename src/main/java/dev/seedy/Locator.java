@@ -14,6 +14,9 @@ import java.util.Map;
 import java.util.concurrent.CancellationException;
 
 public final class Locator implements AutoCloseable {
+    public static final int MAX_RADIUS = 1_048_576;
+    public record SearchProgress(int checked, int found, int range, boolean partial) { }
+    private record Candidate(net.minecraft.world.level.ChunkPos position, double distance) { }
     public interface BiomeSampler { String at(int x, int y, int z); }
     public record Position(int x, int y, int z) { }
     public record Result(String name, int x, Integer y, int z, long distance, String confidence, String dimension, ChestLoot loot, Position elytra) {
@@ -27,9 +30,9 @@ public final class Locator implements AutoCloseable {
     private VanillaStructures vanillaStructures;
     private ChestPredictor chestPredictor;
     private final java.util.Map<String, Catalog> dimensionCatalogs = new java.util.HashMap<>();
-    private record MapStartKey(long seed, String dimension, String target, String cityFilter, int x, int z) { }
+    private record MapStartKey(long seed, String dimension, String target, String cityFilter, Integer salt, boolean pieces, int x, int z) { }
     private final java.util.Map<MapStartKey, java.util.Optional<Result>> mapStarts = new java.util.LinkedHashMap<>(512,0.75f,true) {
-        @Override protected boolean removeEldestEntry(java.util.Map.Entry<MapStartKey, java.util.Optional<Result>> entry) { return size() > 512; }
+        @Override protected boolean removeEldestEntry(java.util.Map.Entry<MapStartKey, java.util.Optional<Result>> entry) { return size() > 4096; }
     };
 
     public Catalog catalog() {
@@ -82,17 +85,28 @@ public final class Locator implements AutoCloseable {
     }
 
     public List<Result> search(long seed, String kind, String target, int x, int y, int z, int radius, LootQuery query, String dimension, String cityFilter) {
-        return search(seed, kind, target, x, y, z, radius, query, dimension, cityFilter, 128, Map.of());
+        return search(seed, kind, target, x, y, z, radius, query, dimension, cityFilter, 256, Map.of(), progress -> { });
     }
 
     public List<Result> search(long seed, String kind, String target, int x, int y, int z, int radius, LootQuery query, String dimension, String cityFilter, Map<String, Integer> paperSalts) {
-        return search(seed, kind, target, x, y, z, radius, query, dimension, cityFilter, 128, paperSalts);
+        return search(seed, kind, target, x, y, z, radius, query, dimension, cityFilter, 256, paperSalts, progress -> { });
+    }
+
+    public List<Result> search(long seed, String kind, String target, int x, int y, int z, int radius, LootQuery query, String dimension, String cityFilter, Map<String, Integer> paperSalts, java.util.function.Consumer<SearchProgress> progress) {
+        return search(seed, kind, target, x, y, z, radius, query, dimension, cityFilter, 256, paperSalts, progress);
     }
 
     BiomeSampler mapBiomes(long seed, String dimension) {
         validateDimension(dimension);
         if (structureSeed == null || structureSeed != seed) { structureWorlds.clear(); structureSeed = seed; }
-        return structureWorlds.computeIfAbsent(dimension, key -> WorldgenAdapter.structureWorld(registries, seed, key)).biomes();
+        var world = structureWorlds.computeIfAbsent(dimension, key -> WorldgenAdapter.structureWorld(registries, seed, key));
+        return WorldgenAdapter.mapBiomes(world, seed);
+    }
+
+    int mapHeight(long seed, int x, int z) {
+        mapBiomes(seed, "overworld");
+        var world = structureWorlds.get("overworld");
+        return world.generator().getBaseHeight(x, z, net.minecraft.world.level.levelgen.Heightmap.Types.OCEAN_FLOOR_WG, world.height(), world.placements().randomState());
     }
 
     List<Result> mapStructures(long seed, String target, int tileX, int tileZ, String dimension, String cityFilter) {
@@ -102,18 +116,18 @@ public final class Locator implements AutoCloseable {
     List<Result> mapStructures(long seed, String target, int tileX, int tileZ, String dimension, String cityFilter, Integer paperSalt) {
         int x = tileX * 1024, z = tileZ * 1024;
         String setTarget = target.equals("minecraft:fortress") || target.equals("minecraft:bastion_remnant") ? "minecraft:nether_complexes" : target;
-        return search(seed, "structure", target, x + 512, 64, z + 512, 1536, LootQuery.NONE, dimension, cityFilter, Integer.MAX_VALUE, paperSalt == null ? Map.of() : Map.of(setTarget, paperSalt)).stream()
+        return search(seed, "structure", target, x + 512, 64, z + 512, 1536, LootQuery.NONE, dimension, cityFilter, Integer.MAX_VALUE, paperSalt == null ? Map.of() : Map.of(setTarget, paperSalt), progress -> { }).stream()
             .filter(result -> result.x() >= x && result.x() < x + 1024 && result.z() >= z && result.z() < z + 1024).toList();
     }
 
-    private List<Result> search(long seed, String kind, String target, int x, int y, int z, int radius, LootQuery query, String dimension, String cityFilter, int limit, Map<String, Integer> paperSalts) {
+    private List<Result> search(long seed, String kind, String target, int x, int y, int z, int radius, LootQuery query, String dimension, String cityFilter, int limit, Map<String, Integer> paperSalts, java.util.function.Consumer<SearchProgress> progress) {
         validateDimension(dimension);
         if (!List.of("any", "with_elytra", "without_elytra").contains(cityFilter)) throw new IllegalArgumentException("Choose all cities, with elytra, or without elytra.");
         if (!cityFilter.equals("any") && (!kind.equals("structure") || !target.equals("minecraft:end_cities"))) throw new IllegalArgumentException("The elytra filter only applies to End cities.");
         if (structureSeed == null || structureSeed != seed) { structureWorlds.clear(); structureSeed = seed; }
         if (query.enabled() && (!kind.equals("structure") || !LootQuery.supports(target))) throw new IllegalArgumentException("Chest loot is supported for ancient cities and desert temples.");
         if (query.enabled() && query.requirements().stream().anyMatch(rule -> !LootCatalog.items().contains(rule.item()))) throw new IllegalArgumentException("Choose an item from the chest loot list.");
-        if (radius < 128 || radius > 8192 || Math.abs((long)x) > 29_990_000 || Math.abs((long)z) > 29_990_000 || y < -64 || y > 320) throw new IllegalArgumentException("Use a radius of 128–8192 and coordinates inside world bounds.");
+        if (radius < 128 || radius > MAX_RADIUS || Math.abs((long)x) > 29_990_000 || Math.abs((long)z) > 29_990_000 || y < -64 || y > 320) throw new IllegalArgumentException("Use a radius of 128–1048576 and coordinates inside world bounds.");
         var results = new ArrayList<Result>();
         if (kind.equals("structure")) {
             boolean specificNetherStructure = target.equals("minecraft:fortress") || target.equals("minecraft:bastion_remnant");
@@ -126,25 +140,34 @@ public final class Locator implements AutoCloseable {
             }
             if (!catalog(dimension).structures().contains(target)) throw new IllegalArgumentException("This structure is not available in the selected dimension.");
             var world = structureWorlds.computeIfAbsent(dimension, d -> WorldgenAdapter.structureWorld(registries, seed, d));
-            var candidates = new ArrayList<net.minecraft.world.level.ChunkPos>();
+            Iterable<Candidate> candidates;
             if (placement instanceof RandomSpreadStructurePlacement spread) {
-                int spacing = spread.spacing();
-                for (int rx = Math.floorDiv((x - radius) >> 4, spacing); rx <= Math.floorDiv((x + radius) >> 4, spacing); rx++) {
-                    checkCancelled();
-                    for (int rz = Math.floorDiv((z - radius) >> 4, spacing); rz <= Math.floorDiv((z + radius) >> 4, spacing); rz++) candidates.add(spread.getPotentialStructureChunk(seed, rx * spacing, rz * spacing));
-                }
+                candidates = () -> java.util.stream.StreamSupport.stream(new SearchRegions(x, z, spread.spacing() * 16, radius + 512).spliterator(), false)
+                    .map(region -> new Candidate(spread.getPotentialStructureChunk(seed, region.x() * spread.spacing(), region.z() * spread.spacing()), region.distance())).iterator();
             } else if (placement instanceof ConcentricRingsStructurePlacement rings) {
                 var positions = world.placements().getRingPositionsFor(rings);
-                if (positions != null) candidates.addAll(positions);
+                candidates = positions == null ? List.of() : positions.stream().map(pos -> new Candidate(pos, Math.hypot((long)pos.x() * 16 + 8 - x, (long)pos.z() * 16 + 8 - z))).sorted(Comparator.comparingDouble(Candidate::distance)).toList();
             } else throw new IllegalArgumentException("This placement type is not supported.");
-            for (var pos : candidates) {
+            int checked = 0;
+            double cutoff = radius;
+            boolean partial = false;
+            long deadline = System.nanoTime() + 120_000_000_000L;
+            for (var candidate : candidates) {
                     checkCancelled();
-                    int px = pos.x() * 16 + 8, pz = pos.z() * 16 + 8;
-                    if (Math.hypot((long)px - x, (long)pz - z) > radius || !placement.isStructureChunk(world.placements(), pos.x(), pos.z())) continue;
+                    if (candidate.distance() > cutoff + 512) break;
+                    if (checked >= 100_000 || System.nanoTime() > deadline) { partial = true; break; }
+                    var pos = candidate.position();
+                    if (++checked % 32 == 0) progress.accept(new SearchProgress(checked, Math.min(limit, results.size()), (int)candidate.distance(), false));
+                    if (Math.abs((long)pos.x() * 16) > 29_999_000 || Math.abs((long)pos.z() * 16) > 29_999_000 || !placement.isStructureChunk(world.placements(), pos.x(), pos.z())) continue;
+                    if (results.size() >= limit) {
+                        results.sort(Comparator.comparingLong(Result::distance));
+                        if (results.size() > limit) results.subList(limit, results.size()).clear();
+                        cutoff = Math.min(radius, results.getLast().distance());
+                    }
                     if (vanillaStructures == null) vanillaStructures = new VanillaStructures((net.minecraft.core.RegistryAccess)registries);
-                    if (limit == Integer.MAX_VALUE) {
-                        var key = new MapStartKey(seed, dimension, target, cityFilter, pos.x(), pos.z());
-                        var marker = mapStarts.computeIfAbsent(key, ignored -> java.util.Optional.ofNullable(mapStart(seed, target, dimension, cityFilter, set.value(), world, pos)));
+                    if (limit == Integer.MAX_VALUE || !query.enabled()) {
+                        var key = new MapStartKey(seed, dimension, target, cityFilter, paperSalts.get(setTarget), limit != Integer.MAX_VALUE, pos.x(), pos.z());
+                        var marker = mapStarts.computeIfAbsent(key, ignored -> java.util.Optional.ofNullable(mapStart(seed, target, dimension, cityFilter, set.value(), world, pos, limit != Integer.MAX_VALUE)));
                         if (marker.isPresent()) {
                             var result = marker.get();
                             double distance = Math.hypot((long)result.x() - x, (long)result.z() - z);
@@ -169,14 +192,17 @@ public final class Locator implements AutoCloseable {
                     double distance = Math.hypot((long)center.getX() - x, (long)center.getZ() - z);
                     if (distance <= radius) results.add(new Result(generated.name(), center.getX(), height, center.getZ(), Math.round(distance), portalRoom.isPresent() ? "Vanilla stronghold portal room" : "Vanilla structure start and pieces generated for this seed and game version", dimension, chestLoot, elytra));
             }
+            progress.accept(new SearchProgress(checked, Math.min(limit, results.size()), (int)cutoff, partial));
         } else if (kind.equals("biome")) {
             if (!catalog(dimension).biomes().contains(target)) throw new IllegalArgumentException("This biome is not available in the selected dimension.");
             var sampler = structureWorlds.computeIfAbsent(dimension, key -> WorldgenAdapter.structureWorld(registries, seed, key)).biomes();
-            for (int dx = -radius; dx <= radius; dx += 64) {
+            int stride = 64;
+            while ((long)(radius / stride) * (radius / stride) > 262_144) stride *= 2;
+            for (int dx = -radius; dx <= radius; dx += stride) {
                 checkCancelled();
-                for (int dz = -radius; dz <= radius; dz += 64) {
+                for (int dz = -radius; dz <= radius; dz += stride) {
                     if ((long)dx * dx + (long)dz * dz <= (long)radius * radius && sampler.at(x + dx, y, z + dz).equals(target)) {
-                        add(results, target, x + dx, y, z + dz, x, z, radius, "Vanilla dimension noise biome at selected Y; 64-block sampling", dimension);
+                        add(results, target, x + dx, y, z + dz, x, z, radius, "Vanilla dimension noise biome at selected Y; " + stride + "-block sampling", dimension);
                     }
                 }
             }
@@ -190,8 +216,8 @@ public final class Locator implements AutoCloseable {
         return MultiNoiseBiomeSource.createFromPreset(registries.lookupOrThrow(Registries.MULTI_NOISE_BIOME_SOURCE_PARAMETER_LIST).getOrThrow(preset));
     }
 
-    private Result mapStart(long seed, String target, String dimension, String cityFilter, net.minecraft.world.level.levelgen.structure.StructureSet set, StructureWorld world, net.minecraft.world.level.ChunkPos position) {
-        if (target.equals("minecraft:villages")) {
+    private Result mapStart(long seed, String target, String dimension, String cityFilter, net.minecraft.world.level.levelgen.structure.StructureSet set, StructureWorld world, net.minecraft.world.level.ChunkPos position, boolean piecesRequired) {
+        if (target.equals("minecraft:villages") && !piecesRequired) {
             var point = vanillaStructures.villageStart(set, world, seed, position);
             return point == null ? null : new Result(point.name(), point.position().getX(), null, point.position().getZ(), 0, "Vanilla village start with terrain and biome checks", dimension);
         }

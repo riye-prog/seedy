@@ -1,7 +1,12 @@
+static void hudSettings();
+
 struct UiPreferences {
     float width = 1040, height = 760, x = -1, y = -1, sidebarWidth = 240;
     float opacity = 1, markerSize = 4, zoomSpeed = 0.5f;
-    int detail = 1, grid = 1;
+    int detail = 2, grid = 1, hudAnchor = 1;
+    float hudScale = 1, hudOpacity = 0.86f, hudX = 0.02f, hudY = 0.1f;
+    bool relief = true, coastlines = true, hudEnabled = false;
+    bool hudCoordinates = true, hudBiome = true, hudDimension = true, hudFps = true, hudRecovery = true, hudEvidence = false, hudWaypoint = true, hudSeed = false, hudAutoTarget = true;
     bool maximized = false, controls = true, biomeLabels = true, structureLabels = true, showPlayer = true;
 };
 
@@ -9,23 +14,42 @@ static UiPreferences preferences;
 static bool preferencesLoaded = false, restoreWindow = false;
 static std::string savedPreferences, pendingPreferences;
 static double preferencesChangedAt = 0;
+static int hudRevisionSeen = -1;
+static bool hudEditing = false;
 static ImVec2 requestedWindowSize{-1,-1};
 
 static Json preferenceValues() {
-    return {{"width",preferences.width},{"height",preferences.height},{"x",preferences.x},{"y",preferences.y},{"sidebarWidth",preferences.sidebarWidth},{"opacity",preferences.opacity},{"markerSize",preferences.markerSize},{"zoomSpeed",preferences.zoomSpeed},{"detail",preferences.detail},{"grid",preferences.grid},{"maximized",preferences.maximized},{"controls",preferences.controls},{"biomeLabels",preferences.biomeLabels},{"structureLabels",preferences.structureLabels},{"showPlayer",preferences.showPlayer},{"section",activeSection}};
+    return {{"width",preferences.width},{"height",preferences.height},{"x",preferences.x},{"y",preferences.y},{"sidebarWidth",preferences.sidebarWidth},{"opacity",preferences.opacity},{"markerSize",preferences.markerSize},{"zoomSpeed",preferences.zoomSpeed},{"detail",preferences.detail},{"grid",preferences.grid},{"maximized",preferences.maximized},{"controls",preferences.controls},{"biomeLabels",preferences.biomeLabels},{"structureLabels",preferences.structureLabels},{"showPlayer",preferences.showPlayer},{"section",activeSection},{"relief",preferences.relief},{"coastlines",preferences.coastlines},{"hudEnabled",preferences.hudEnabled},{"hudScale",preferences.hudScale},{"hudOpacity",preferences.hudOpacity},{"hudAnchor",preferences.hudAnchor},{"hudX",preferences.hudX},{"hudY",preferences.hudY},{"hudCoordinates",preferences.hudCoordinates},{"hudBiome",preferences.hudBiome},{"hudDimension",preferences.hudDimension},{"hudFps",preferences.hudFps},{"hudRecovery",preferences.hudRecovery},{"hudEvidence",preferences.hudEvidence},{"hudWaypoint",preferences.hudWaypoint},{"hudSeed",preferences.hudSeed},{"hudAutoTarget",preferences.hudAutoTarget}};
 }
 
 static void loadPreferences() {
-    if (preferencesLoaded) return;
+    if (preferencesLoaded) {
+        int revision = state.value("hudRevision",0);
+        if (revision != hudRevisionSeen) {
+            hudRevisionSeen = revision;
+            preferences.hudEnabled = state.value("uiSettings",Json::object()).value("hudEnabled",false);
+            if (!savedPreferences.empty()) { auto saved = Json::parse(savedPreferences); saved["hudEnabled"] = preferences.hudEnabled; savedPreferences = saved.dump(); }
+        }
+        return;
+    }
     preferencesLoaded = true;
     const auto settings = state.value("uiSettings", Json::object());
     preferences.width = settings.value("width",1040.0f); preferences.height = settings.value("height",760.0f);
     preferences.x = settings.value("x",-1.0f); preferences.y = settings.value("y",-1.0f);
     preferences.sidebarWidth = settings.value("sidebarWidth",240.0f); preferences.opacity = settings.value("opacity",1.0f);
     preferences.markerSize = settings.value("markerSize",4.0f); preferences.zoomSpeed = settings.value("zoomSpeed",0.5f);
-    preferences.detail = settings.value("detail",1); preferences.grid = settings.value("grid",1);
+    preferences.detail = settings.value("detail",2); preferences.grid = settings.value("grid",1);
     preferences.maximized = settings.value("maximized",false); preferences.controls = settings.value("controls",true);
     preferences.biomeLabels = settings.value("biomeLabels",true); preferences.structureLabels = settings.value("structureLabels",true); preferences.showPlayer = settings.value("showPlayer",true);
+    preferences.relief = settings.value("relief",true); preferences.coastlines = settings.value("coastlines",true);
+    preferences.hudEnabled = settings.value("hudEnabled",false); preferences.hudAnchor = settings.value("hudAnchor",1);
+    preferences.hudScale = settings.value("hudScale",1.0f); preferences.hudOpacity = settings.value("hudOpacity",0.86f);
+    preferences.hudX = settings.value("hudX",0.02f); preferences.hudY = settings.value("hudY",0.1f);
+    preferences.hudCoordinates = settings.value("hudCoordinates",true); preferences.hudBiome = settings.value("hudBiome",true);
+    preferences.hudDimension = settings.value("hudDimension",true); preferences.hudFps = settings.value("hudFps",true);
+    preferences.hudRecovery = settings.value("hudRecovery",true); preferences.hudEvidence = settings.value("hudEvidence",false);
+    preferences.hudWaypoint = settings.value("hudWaypoint",true); preferences.hudSeed = settings.value("hudSeed",false); preferences.hudAutoTarget = settings.value("hudAutoTarget",true);
+    hudRevisionSeen = state.value("hudRevision",0);
     activeSection = settings.value("section",activeSection);
     savedPreferences = preferenceValues().dump();
 }
@@ -50,6 +74,8 @@ static void mapAppearanceSettings() {
     const char *grids[] = {"No grid", "Coordinate grid", "Chunk grid"};
     ImGui::SetNextItemWidth(-1);
     ImGui::Combo("##map-grid", &preferences.grid, grids, 3);
+    ImGui::Checkbox("Terrain shading", &preferences.relief);
+    ImGui::Checkbox("Coastlines", &preferences.coastlines);
     ImGui::Checkbox("Biome names", &preferences.biomeLabels);
     ImGui::Checkbox("Structure names", &preferences.structureLabels);
     ImGui::Checkbox("Player marker", &preferences.showPlayer);
@@ -75,9 +101,10 @@ static void settingsPanel() {
     ImGui::SliderFloat("Sidebar width", &preferences.sidebarWidth,180,400,"%.0f px");
     ImGui::Spacing(); ImGui::TextUnformatted("Map defaults");
     ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding,{12 * uiScale,12 * uiScale});
-    ImGui::BeginChild("settings-map", {std::min(360 * uiScale,ImGui::GetContentRegionAvail().x),314 * uiScale},ImGuiChildFlags_AlwaysUseWindowPadding);
+    ImGui::BeginChild("settings-map", {std::min(360 * uiScale,ImGui::GetContentRegionAvail().x),390 * uiScale},ImGuiChildFlags_AlwaysUseWindowPadding);
     mapAppearanceSettings(); ImGui::EndChild();
     ImGui::PopStyleVar();
+    if (ImGui::CollapsingHeader("Gameplay overlay",ImGuiTreeNodeFlags_DefaultOpen)) hudSettings();
     if (ImGui::Button("Reset settings")) { preferences = UiPreferences{}; requestedWindowSize = {1040,760}; restoreWindow = true; }
     ImGui::TextDisabled("Window and map settings save automatically.");
 }

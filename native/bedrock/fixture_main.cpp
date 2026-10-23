@@ -1,4 +1,5 @@
 #include "blocks.h"
+#include "cancellation.h"
 #include "java_helper.h"
 #include "ore_validation.h"
 #include <atomic>
@@ -35,6 +36,9 @@ bool matchesWorldSeed(uint64_t seed) {
     }
     return !checkExpectedSeed || seed == expectedSeed;
 }
+
+void startRecoveryCancellation() {}
+void stopRecoveryCancellation() {}
 
 bool shouldContinueSearch() {
     static const auto started = std::chrono::steady_clock::now();

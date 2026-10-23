@@ -5,6 +5,7 @@ import java.util.List;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.BooleanSupplier;
@@ -20,24 +21,30 @@ public final class RecoveryEngine implements AutoCloseable {
     private volatile long total;
     private volatile String stage = "Idle";
     private volatile boolean running;
+    private final AtomicInteger activeTasks = new AtomicInteger();
+    private volatile Future<?> currentTask;
 
-    public boolean running() { return running; }
-    public String stage() { return stage; }
+    public boolean running() { return running || activeTasks.get() > 0; }
+    public String stage() { return !running && activeTasks.get() > 0 ? "Stopping search" : stage; }
     public double progress() { return total == 0 ? 0 : Math.min(1, (double)checked.get() / total); }
     public static double evidenceBits(List<Observation> observations) { return observations.stream().mapToDouble(o -> 2 * Math.log(o.rule().bound()) / Math.log(2)).sum(); }
 
     public synchronized void start(List<Observation> observations, long hash, LongConsumer recovered) {
         if (observations.size() < 5 || evidenceBits(observations) < 40) throw new IllegalArgumentException("Collect at least five independent structures and 40 evidence bits.");
+        if (running()) throw new IllegalArgumentException("Wait for the current search to stop.");
         cancel();
         long task = generation.get();
         running = true;
         stage = "Checking rejected random draws";
         var constraints = observations.stream().map(o -> o.rule().constrain(o.chunkX(), o.chunkZ())).toList();
         var lifting = constraints.stream().sorted(java.util.Comparator.comparingInt((PlacementRule.Constraint c) -> Integer.lowestOneBit(c.bound())).reversed()).limit(16).toList();
-        coordinator.submit(() -> {
+        currentTask = coordinator.submit(() -> {
+            activeTasks.incrementAndGet();
             var found = new AtomicReference<Long>();
             BooleanSupplier cancelled = () -> generation.get() != task || found.get() != null || Thread.currentThread().isInterrupted();
+            var jobs = new ArrayList<Future<?>>();
             try {
+                if (cancelled.getAsBoolean()) return;
                 scanRejectedDraws(lifting, cancelled, candidate -> {
                     if (!matches(candidate, constraints)) return false;
                     Long seed = SeedHash.recover(candidate, hash, cancelled);
@@ -55,23 +62,25 @@ public final class RecoveryEngine implements AutoCloseable {
                 total = lowerSeeds.size() * (1L << 29);
                 checked.set(0);
                 stage = "Searching structure seeds";
-                var jobs = new ArrayList<Future<?>>();
                 for (int worker = 0; worker < workerCount; worker++) {
                     long start = (1L << 29) * worker / workerCount;
                     long end = (1L << 29) * (worker + 1) / workerCount;
                     jobs.add(workers.submit(() -> {
-                        for (long lower : lowerSeeds) {
-                            for (long upper = start; upper < end; upper++) {
-                                if ((upper & 4095) == 0) {
-                                    if (cancelled.getAsBoolean()) return;
-                                    checked.addAndGet(Math.min(4096, end - upper));
+                        activeTasks.incrementAndGet();
+                        try {
+                            for (long lower : lowerSeeds) {
+                                for (long upper = start; upper < end; upper++) {
+                                    if ((upper & 4095) == 0) {
+                                        if (cancelled.getAsBoolean()) return;
+                                        checked.addAndGet(Math.min(4096, end - upper));
+                                    }
+                                    long candidate = (upper << 19) | lower;
+                                    if (!matches(candidate, constraints)) continue;
+                                    Long seed = SeedHash.recover(candidate, hash, cancelled);
+                                    if (seed != null) { found.compareAndSet(null, seed); return; }
                                 }
-                                long candidate = (upper << 19) | lower;
-                                if (!matches(candidate, constraints)) continue;
-                                Long seed = SeedHash.recover(candidate, hash, cancelled);
-                                if (seed != null) { found.compareAndSet(null, seed); return; }
                             }
-                        }
+                        } finally { activeTasks.decrementAndGet(); }
                     }));
                 }
                 for (var job : jobs) job.get();
@@ -81,7 +90,9 @@ public final class RecoveryEngine implements AutoCloseable {
             } catch (Exception e) {
                 if (generation.get() == task) stage = "Search stopped: " + e.getClass().getSimpleName();
             } finally {
+                for (var job : jobs) job.cancel(true);
                 if (generation.get() == task) running = false;
+                activeTasks.decrementAndGet();
             }
         });
     }
@@ -121,6 +132,8 @@ public final class RecoveryEngine implements AutoCloseable {
 
     public synchronized void cancel() {
         generation.incrementAndGet();
+        Future<?> task = currentTask;
+        if (task != null) task.cancel(true);
         running = false;
         stage = "Idle";
         checked.set(0);

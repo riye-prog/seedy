@@ -21,6 +21,15 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 class BedrockRecoveryTest {
     @BeforeAll static void bootstrap() { SharedConstants.tryDetectVersion(); Bootstrap.bootStrap(); }
 
+    @Test void cancelledPreparationStopsBeforeAllocatingVeinNeighborhoods() {
+        long[] entries = new long[2_000_000];
+        java.util.Arrays.fill(entries,1);
+        org.junit.jupiter.api.Assertions.assertTimeoutPreemptively(java.time.Duration.ofMillis(200), () ->
+            org.junit.jupiter.api.Assertions.assertThrows(java.util.concurrent.CancellationException.class, () -> BedrockRecovery.retainNearbyVeins(entries, () -> false)));
+        assertFalse(BedrockRecovery.INSTANCE.running());
+        assertFalse(NetherBedrockRecovery.INSTANCE.running());
+    }
+
     @Test void rawOreCountsTrackChunkRefreshWithoutDuplicates() {
         var factory = PalettedContainerFactory.create((RegistryAccess)WorldgenAdapter.registries());
         var chunk = new ProtoChunk(new ChunkPos(3, -2), UpgradeData.EMPTY, LevelHeightAccessor.create(-64, 384), factory, null);

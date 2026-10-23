@@ -1,4 +1,5 @@
 #pragma once
+#include <atomic>
 #include <chrono>
 #include <system_error>
 #include <thread>
@@ -21,19 +22,28 @@ public:
     }
 };
 
+class SolverCancellation {
+    std::atomic<bool> finished{false};
+    std::thread worker;
+public:
+    SolverCancellation(z3::context& context, bool (*shouldContinue)()) {
+        try {
+            worker = std::thread([this, &context, shouldContinue] {
+                while (!finished.load(std::memory_order_relaxed)) {
+                    if (!shouldContinue()) context.interrupt();
+                    std::this_thread::sleep_for(std::chrono::milliseconds(20));
+                }
+            });
+        } catch (const std::system_error&) { }
+    }
+    ~SolverCancellation() {
+        finished.store(true, std::memory_order_relaxed);
+        if (worker.joinable()) worker.join();
+    }
+};
+
 inline z3::check_result cancellableSolverCheck(z3::solver& solver, bool (*shouldContinue)()) {
     if (!shouldContinue()) return z3::unknown;
-    auto& context = solver.ctx();
-    std::jthread cancellation;
-    try {
-        cancellation = std::jthread([&](std::stop_token stop) {
-            while (!stop.stop_requested()) {
-                if (!shouldContinue()) context.interrupt();
-                std::this_thread::sleep_for(std::chrono::milliseconds(50));
-            }
-        });
-    } catch (const std::system_error&) { }
-    auto result = solver.check();
-    cancellation.request_stop();
-    return result;
+    SolverCancellation cancellation(solver.ctx(), shouldContinue);
+    return solver.check();
 }
