@@ -1,0 +1,29 @@
+{
+  "version": "0.9.17",
+  "fix": "share one Minecraft key-mapping category between the panel and gameplay overlay",
+  "crash_reproduced_before_fix": true,
+  "minecraft_client_launched": false,
+  "native_libraries_unchanged_from": "0.9.16",
+  "jars": [
+    {
+      "target": "26.2",
+      "jar": "seedy-0.9.17+26.2.jar",
+      "sha256": "8a90405d84000891a66fb0edd8bf3b18a52b050053505c83c7fe99d44c0076c6",
+      "bytes": 38092977,
+      "tests": 65,
+      "native_libraries": 16,
+      "startup_category_registration_count": 1,
+      "controls_regression": "passed"
+    },
+    {
+      "target": "26.3",
+      "jar": "seedy-0.9.17+26.3.jar",
+      "sha256": "32f922c3eb61bb2c1edbe6ee97f00ef4226173b4c3f82b82f1717400531a3e79",
+      "bytes": 38092173,
+      "tests": 64,
+      "native_libraries": 16,
+      "startup_category_registration_count": 1,
+      "controls_regression": "passed"
+    }
+  ]
+}
