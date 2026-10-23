@@ -77,7 +77,7 @@ new_empty = """\tif(xvs.size() == 0)
 \tstd::vector<std::tuple<uint64_t, uint32_t, bool>> packed;
 \tpacked.reserve(xvs.size());
 \tfor (auto [xv, probability, expected] : xvs)
-\t\tpacked.emplace_back(xv, static_cast<uint32_t>(std::ceil(probability * 16777216.0)), expected);"""
+\t\tif (mode != 2 || expected) packed.emplace_back(xv, static_cast<uint32_t>(std::ceil(probability * 16777216.0)), expected);"""
 old_scan = "\tsendUpdate(\"commands.bedrockcrack.crackedRandomStateRandom\", false, i0, i1);\n\tcrackFP(i0, i1);"
 new_scan = """\tauto randomLong = [](uint64_t low, uint64_t high) {
 \t\treturn std::rotl(low + high, 17) + low;
@@ -131,17 +131,19 @@ new_scan = """\tauto randomLong = [](uint64_t low, uint64_t high) {
 \t\tfor (uint64_t position : rawPositions) if (!rawOreMatches(numericRawStates, position)) rawMismatches.push_back(position);
 \t\treturn std::tuple{errors, checked, veinErrors, veinChecked};
 \t};
-\tuint64_t candidateLimit = useRawConstraints ? 8 : 3;
+\tuint64_t candidateLimit = useRawConstraints ? 256 : 8;
 \tfor (uint64_t index = 0; index < candidateLimit && shouldContinueSearch(); index++) {
 \t\tsendUpdate("commands.bedrockcrack.validatingRandomState", false);
 \t\tauto [errors, checked, veinErrors, veinChecked] = validate(i0, i1);
 \t\tbool baseMatches = errors == 0;
 \t\tbool veinMatches = useRawConstraints || veinChecked < 256 || veinErrors * 50 <= veinChecked * 9;
-\t\tif (baseMatches && veinMatches && rawMismatches.empty()) {
+\t\tbool blockMatches = baseMatches && veinMatches && rawMismatches.empty();
+\t\tif (blockMatches && matchesRandomState(i0, i1)) {
 \t\t\tsendUpdate("commands.bedrockcrack.crackedRandomStateRandom", false, i0, i1);
 \t\t\tcrackFP(i0, i1);
 \t\t\treturn;
 \t\t}
+\t\tif (blockMatches) sendUpdate("commands.bedrockcrack.oreNoiseMismatch", false);
 \t\tsendUpdate("commands.bedrockcrack.stateCandidateRejected", false, index + 1, static_cast<uint64_t>(veinErrors), static_cast<uint64_t>(veinChecked));
 \t\tsendUpdate("commands.bedrockcrack.baseEvidenceMismatch", false, static_cast<uint64_t>(errors), static_cast<uint64_t>(checked));
 \t\tif (index + 1 == candidateLimit) break;
@@ -200,7 +202,23 @@ expected_counts = {
 if any(source.count(value) != count for value, count in expected_counts.items()):
     raise SystemExit("unexpected bedrock solver source")
 
-source = source.replace("#include <algorithm>", '#include <algorithm>\n#include <cmath>\n#include "raw_constraints.h"\n#include "solver_control.h"', 1)
+source = source.replace("#include <algorithm>", '#include <algorithm>\n#include <cmath>\n#include "raw_constraints.h"\n#include "solver_control.h"\n#include "ore_validation.h"', 1)
+source = source.replace(old_solver, "\tauto solver = makeRecoverySolver(ctx);", 1)
+constraint_start = source.index("\tauto constrain = [&]")
+constraint_end = source.index("\n\t};", constraint_start) + len("\n\t};")
+source = source[:constraint_start] + "\tauto constrain = [&](std::span<const std::bitset<128>> candidates, z3::expr low, z3::expr high) { constrainStateCandidates(solver, candidates, low, high); };" + source[constraint_end:]
+source = source.replace('#include "ore_validation.h"', '#include "ore_validation.h"\n#include "candidate_constraints.h"', 1)
+source = source.replace('#include "candidate_constraints.h"', '#include "candidate_constraints.h"\n#include "positional_candidates.h"', 1)
+positional_refinement = """\tif (mode <= 2 && iters >= 17) {
+\t\tstd::vector<std::pair<uint64_t, uint64_t>> candidates;
+\t\tfor (const auto& candidate : cur)
+\t\t\tcandidates.emplace_back(candidate.w1 << (64 - iters) | candidate.w2 << (47 - iters), candidate.w3 << (47 - iters));
+\t\tauto refined = refinePositionalCandidates(packed, candidates, static_cast<unsigned int>(iters), shouldContinueSearch);
+\t\tif (!refined.empty()) sendUpdate("commands.bedrockcrack.foundationCandidates", false, static_cast<uint64_t>(mode), static_cast<uint64_t>(refined[0].count()), static_cast<uint64_t>(refined.size() - 1));
+\t\treturn refined;
+\t}
+"""
+source = source.replace("\tstd::vector<std::bitset<128>> ret;", positional_refinement + "\tstd::vector<std::bitset<128>> ret;", 1)
 source = source.replace("static bool get(uint64_t seedlo, uint64_t seedhi, uint64_t xv, double p)", "static bool get(uint64_t seedlo, uint64_t seedhi, uint64_t xv, uint32_t cutoff)", 1)
 source = source.replace("static std::vector<std::bitset<128>> solve(std::vector<std::tuple<uint64_t, double, bool>> xvs, int mode)", "static std::vector<std::bitset<128>> solve(const std::vector<std::tuple<uint64_t, double, bool>>& xvs, int mode)", 1)
 source = source.replace(old_return, new_return, 1)

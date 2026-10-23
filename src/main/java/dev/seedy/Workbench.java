@@ -161,6 +161,29 @@ public final class Workbench implements AutoCloseable {
 
     private void startRecovery() {
         if (hash == null) throw new IllegalArgumentException("Join a world to receive its seed hash.");
+        if (verified) throw new IllegalArgumentException("The world seed is already verified.");
+        if (anyRecoveryRunning()) throw new IllegalArgumentException("A seed search is already running.");
+        switch (recoverySource()) {
+            case "Nether bedrock" -> NetherBedrockRecovery.INSTANCE.tryCurrentData();
+            case "Overworld blocks" -> BedrockRecovery.INSTANCE.tryCurrentData();
+            case "structure observations" -> startStructureRecovery();
+            default -> throw new IllegalArgumentException("Wait for loaded chunks to finish scanning. Recovery uses the collected block and structure data automatically.");
+        }
+    }
+
+    private boolean anyRecoveryRunning() {
+        return recovery.running() || BedrockRecovery.INSTANCE.running() || NetherBedrockRecovery.INSTANCE.running();
+    }
+
+    private String recoverySource() {
+        if (NetherBedrockRecovery.INSTANCE.canTry()) return "Nether bedrock";
+        if (BedrockRecovery.INSTANCE.canTry()) return "Overworld blocks";
+        var evidence = structureEvidence();
+        return generationVersion.equals(gameVersion) && evidence.size() >= 5 && RecoveryEngine.evidenceBits(evidence) >= 40 ? "structure observations" : "";
+    }
+
+    private void startStructureRecovery() {
+        if (hash == null) throw new IllegalArgumentException("Join a world to receive its seed hash.");
         if (!generationVersion.equals(gameVersion)) throw new IllegalArgumentException("Use the matching 26.2 or 26.3 Seedy jar to recover this world's seed from structures.");
         if (verified) throw new IllegalArgumentException("The world seed is already verified.");
         var selected = structureEvidence();
@@ -214,7 +237,12 @@ public final class Workbench implements AutoCloseable {
                 case "tryNetherRecovery" -> NetherBedrockRecovery.INSTANCE.tryCurrentData();
                 case "stopNetherRecovery" -> NetherBedrockRecovery.INSTANCE.stopSearch();
                 case "recover" -> startRecovery();
-                case "stopRecovery" -> { recovery.cancel(); revision++; }
+                case "stopRecovery" -> {
+                    recovery.cancel();
+                    if (BedrockRecovery.INSTANCE.running()) BedrockRecovery.INSTANCE.stopSearch();
+                    if (NetherBedrockRecovery.INSTANCE.running()) NetherBedrockRecovery.INSTANCE.stopSearch();
+                    revision++;
+                }
                 case "recoverPaperSalt" -> recoverPaperSalt(body.get("structure").getAsString());
                 case "stopPaperSalt" -> { paperRecovery.cancel(); revision++; }
                 case "selectObservation" -> {
@@ -231,6 +259,7 @@ public final class Workbench implements AutoCloseable {
                     if (!List.of("26.2", "26.3").contains(version)) throw new IllegalArgumentException("Choose a supported generation version.");
                     if (!version.equals(generationVersion)) {
                         generationVersion = version;
+                        if (BedrockRecovery.INSTANCE.running()) BedrockRecovery.INSTANCE.stopSearch();
                         recovery.cancel();
                         paperRecovery.cancel();
                         cancelSearch();
@@ -406,6 +435,9 @@ public final class Workbench implements AutoCloseable {
         state.addProperty("connected", connected);
         state.addProperty("collecting", collecting);
         state.addProperty("recovering", recovery.running());
+        String recoverySource = recoverySource();
+        state.addProperty("recoverySource", recoverySource);
+        state.addProperty("recoveryCanStart", connected && !verified && !anyRecoveryRunning() && !recoverySource.isEmpty());
         state.addProperty("recoveryStatus", recovery.stage());
         state.addProperty("progress", recovery.progress());
         state.addProperty("evidence", RecoveryEngine.evidenceBits(structureEvidence()));

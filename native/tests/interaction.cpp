@@ -86,6 +86,7 @@ int main(int argc, char **argv) {
         state["patternRawChunks"] = 21;
         state["patternCanTry"] = true;
         tick(); tick();
+        require(click("Recover seed").value("action", "") == "recover", "Collected blocks did not enable automatic recovery without structures");
         require(click("Try current data").value("action", "") == "tryBlockRecovery", "Block recovery button did not activate");
         state["patternRunning"] = true;
         state["patternPass"] = 2;
@@ -96,6 +97,7 @@ int main(int argc, char **argv) {
         state["patternPreviousPass"] = "This pass found no consistent random state";
         state["patternProgress"] = 0.25;
         tick(); tick();
+        require(click("Stop search").value("action", "") == "stopRecovery", "Main recovery button did not stop a block search");
         require(click("Stop block check").value("action", "") == "stopBlockRecovery", "Block recovery stop button did not activate");
         state["patternRunning"] = false;
         state["verified"] = true;

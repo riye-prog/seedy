@@ -197,8 +197,8 @@ static void dataTableHeadersRow() {
 }
 
 static void recoveryPanel(Json &command) {
-    sectionHeading("Seed recovery", "Collect evidence as you play. Choose what to check, then start a search.");
-    bool running = state.value("recovering", false);
+    sectionHeading("Seed recovery", "Collect loaded chunks, then recover the seed. Evidence is selected automatically.");
+    bool running = state.value("recovering", false) || state.value("patternRunning", false) || state.value("netherPatternRunning", false);
     auto observations = state.value("observations", Json::array());
     if (!state.value("connected", false)) ImGui::TextDisabled("Join a world to collect observations.");
     std::string generationVersion = state.value("generationVersion", state.value("gameVersion", "26.2"));
@@ -222,7 +222,10 @@ static void recoveryPanel(Json &command) {
     ImGui::Separator();
     if (ImGui::Button(state.value("collecting", true) ? "Pause collection" : "Resume collection")) command = {{"action", "collect"}};
     ImGui::SameLine();
-    ImGui::BeginDisabled(!running && (state.value("structureEvidenceCount", 0) < 5 || state.value("evidence", 0.0) < 40 || !state.value("connected", false) || state.value("verified", false) || !versionMatches));
+    bool structureReady = state.value("structureEvidenceCount", 0) >= 5 && state.value("evidence", 0.0) >= 40 && versionMatches;
+    bool evidenceReady = state.value("patternCanTry", false) || state.value("netherPatternCanTry", false) || structureReady;
+    bool canStart = state.value("recoveryCanStart", evidenceReady && state.value("connected", false) && !state.value("verified", false));
+    ImGui::BeginDisabled(!running && !canStart);
     if (ImGui::Button(running ? "Stop search" : "Recover seed")) command = {{"action", running ? "stopRecovery" : "recover"}};
     ImGui::EndDisabled();
     ImGui::SameLine();
@@ -230,6 +233,8 @@ static void recoveryPanel(Json &command) {
     if (ImGui::Button("Rescan")) command = {{"action", "rescan"}};
     ImGui::EndDisabled();
     if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled)) ImGui::SetTooltip("Check loaded chunks again, including structures that loaded in pieces.");
+    auto recoverySource = state.value("recoverySource", "");
+    if (!running && !recoverySource.empty()) ImGui::TextDisabled("Uses collected %s", recoverySource.c_str());
     ImGui::Dummy({0,10 * uiScale});
     ImGui::Separator();
     ImGui::Dummy({0,5 * uiScale});
@@ -312,7 +317,7 @@ static void recoveryPanel(Json &command) {
     ImGui::PushTextWrapPos();
     ImGui::TextUnformatted(state.value("recoveryStatus", "Idle").c_str());
     ImGui::PopTextWrapPos();
-    if (running) ImGui::ProgressBar(static_cast<float>(state.value("progress", 0.0)), {-1, 5 * uiScale}, "");
+    if (state.value("recovering", false)) ImGui::ProgressBar(static_cast<float>(state.value("progress", 0.0)), {-1, 5 * uiScale}, "");
     ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, {12 * uiScale,12 * uiScale});
     if (ImGui::BeginChild("observations", {0, 169 * uiScale}, ImGuiChildFlags_AlwaysUseWindowPadding)) {
         if (observations.empty()) ImGui::TextWrapped("Explore shipwrecks, trial chambers, desert pyramids, or swamp huts. Detected start chunks appear here. For trial chambers, load the starting room as well as the corridors.");

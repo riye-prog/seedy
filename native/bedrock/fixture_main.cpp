@@ -1,5 +1,6 @@
 #include "blocks.h"
 #include "java_helper.h"
+#include "ore_validation.h"
 #include <atomic>
 #include <bit>
 #include <chrono>
@@ -7,6 +8,7 @@
 #include <cstdlib>
 #include <fstream>
 #include <iostream>
+#include <mutex>
 #include <string_view>
 #include <vector>
 
@@ -14,8 +16,23 @@ static std::atomic<bool> foundSeed{false};
 static uint64_t expectedSeed;
 static bool checkExpectedSeed;
 static bool stopAfterState;
+static std::mutex protocolMutex;
+
+bool matchesRandomState(uint64_t low, uint64_t high) {
+    if (std::getenv("SEEDY_JAVA_VALIDATOR") == nullptr) return true;
+    std::lock_guard lock(protocolMutex);
+    std::cout << "validateState " << low << ' ' << high << std::endl;
+    int accepted = 0;
+    return static_cast<bool>(std::cin >> accepted) && accepted == 1;
+}
 
 bool matchesWorldSeed(uint64_t seed) {
+    if (std::getenv("SEEDY_JAVA_VALIDATOR") != nullptr) {
+        std::lock_guard lock(protocolMutex);
+        std::cout << "validateSeed " << seed << std::endl;
+        int accepted = 0;
+        return static_cast<bool>(std::cin >> accepted) && accepted == 1;
+    }
     return !checkExpectedSeed || seed == expectedSeed;
 }
 
@@ -27,6 +44,7 @@ bool shouldContinueSearch() {
 
 template<typename... Args>
 void sendUpdate(const char *key, bool, Args... args) {
+    std::lock_guard lock(protocolMutex);
     if (std::string_view(key) == "commands.bedrockcrack.foundWorldSeed") foundSeed = true;
     std::cout << key;
     ((std::cout << ' ' << args), ...);
@@ -41,7 +59,7 @@ template void sendUpdate<uint64_t, uint64_t, uint64_t>(const char *, bool, uint6
 
 int main(int argc, char **argv) {
     if (argc < 2 || argc > 5) return 2;
-    if (argc >= 3) { expectedSeed = std::stoull(argv[2]); checkExpectedSeed = true; }
+    if (argc >= 3 && std::string_view(argv[2]) != "any") { expectedSeed = std::stoull(argv[2]); checkExpectedSeed = true; }
     int mode = argc >= 4 ? std::stoi(argv[3]) : 31;
     stopAfterState = argc == 5 && std::string_view(argv[4]) == "state";
     std::ifstream input(argv[1], std::ios::binary);

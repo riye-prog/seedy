@@ -1,4 +1,5 @@
 #include "java_helper.h"
+#include "ore_validation.h"
 #include <algorithm>
 #include <cstdint>
 #include <jni.h>
@@ -35,6 +36,20 @@ static JNIEnv *environment(bool &attached) {
         return nullptr;
     }
     return env;
+}
+
+bool matchesRandomState(uint64_t low, uint64_t high) {
+    bool attached = false;
+    JNIEnv *env = environment(attached);
+    if (env == nullptr) return false;
+    jmethodID match = env->GetStaticMethodID(recoveryClass, "matchesRandomState", "(JJ)Z");
+    bool result = match != nullptr && env->CallStaticBooleanMethod(recoveryClass, match, static_cast<jlong>(low), static_cast<jlong>(high));
+    if (env->ExceptionCheck()) {
+        env->ExceptionClear();
+        result = false;
+    }
+    if (attached) javaVm->DetachCurrentThread();
+    return result;
 }
 
 bool matchesWorldSeed(uint64_t seed) {

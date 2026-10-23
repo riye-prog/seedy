@@ -1,5 +1,5 @@
 plugins { id 'net.fabricmc.fabric-loom' version '1.17.21' }
-version = "0.9.14+${project.name}"
+version = "0.9.15+${project.name}"
 group = 'dev.seedy'
 base.archivesName = 'seedy'
 repositories { mavenCentral() }
@@ -13,6 +13,7 @@ loom {
     }
 }
 sourceSets.main.java.srcDir rootProject.file("src/compat/${project.name}")
+sourceSets.test.java.srcDir rootProject.file("src/test/compat/${project.name}")
 sourceSets.main.java.srcDir rootProject.file('vendor/bedrockseed/src/main/java/bedrock/generated')
 dependencies {
     minecraft "com.mojang:minecraft:${project.name}"
@@ -24,6 +25,12 @@ dependencies {
 tasks.withType(JavaCompile).configureEach { options.release = 25 }
 java { toolchain.languageVersion = JavaLanguageVersion.of(25) }
 test { useJUnitPlatform() }
+tasks.register('recoveryReplay', JavaExec) {
+    dependsOn testClasses
+    classpath = sourceSets.test.runtimeClasspath
+    mainClass = 'dev.seedy.RecoveryReplay'
+    if (project.hasProperty('recoveryArgs')) args project.property('recoveryArgs').split(',')
+}
 jar {
     include 'dev/seedy/**', 'bedrock/generated/**', 'assets/seedy/**', 'fabric.mod.json', 'seedy.mixins.json', 'natives/**', 'licenses/**', 'META-INF/MANIFEST.MF'
 }

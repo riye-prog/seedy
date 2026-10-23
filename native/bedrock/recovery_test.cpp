@@ -1,5 +1,7 @@
 #include "raw_constraints.h"
 #include "solver_control.h"
+#include "candidate_constraints.h"
+#include "positional_candidates.h"
 #include <atomic>
 #include <iostream>
 #include <stdexcept>
@@ -26,6 +28,52 @@ static uint64_t mix(uint64_t value) {
     value = (value ^ value >> 30) * 0xbf58476d1ce4e5b9ull;
     value = (value ^ value >> 27) * 0x94d049bb133111ebull;
     return value ^ value >> 31;
+}
+
+static void positionalBoundsPreserveEveryCompletion() {
+    for (unsigned int depth = 17; depth <= 32; depth++) {
+        uint64_t maskLow = std::numeric_limits<uint64_t>::max() << (47 - depth);
+        uint64_t maskHigh = ((uint64_t(1) << depth) - 1) << (47 - depth);
+        for (uint64_t sample = 0; sample < 1024; sample++) {
+            uint64_t low = mix(sample * 17 + depth), high = mix(sample * 31 + depth);
+            uint64_t position = mix(sample * 43 + depth);
+            auto bounds = positionalRange(low & maskLow, high & maskHigh, position, depth);
+            uint64_t value = output(low ^ position, high);
+            require(value - bounds.minimum <= bounds.extent, "positional bounds exclude an RNG completion");
+            uint32_t cutoff = static_cast<uint32_t>(value >> 40);
+            for (uint32_t boundary : {0u, cutoff, cutoff + 1, 1u << 24})
+                require(bounds.possible(boundary, value >> 40 < boundary), "positional prefix pruning rejects a valid observation");
+        }
+    }
+}
+
+static void factoredCandidatesPreserveTheOriginalConstraint() {
+    z3::context context;
+    auto low = context.bv_const("candidate_low", 64u), high = context.bv_const("candidate_high", 64u);
+    for (uint64_t sample = 0; sample < 24; sample++) {
+        std::vector<std::bitset<128>> candidates;
+        auto add = [&](uint64_t first, uint64_t second) {
+            std::bitset<128> value;
+            for (unsigned int bit = 0; bit < 64; bit++) {
+                value[bit] = first >> bit & 1;
+                value[bit + 64] = second >> bit & 1;
+            }
+            candidates.push_back(value);
+        };
+        uint64_t maskLow = mix(sample), maskHigh = mix(sample + 1);
+        add(maskLow, maskHigh);
+        auto original = context.bool_val(false);
+        for (uint64_t index = 0; index < sample % 6; index++) {
+            uint64_t first = mix(sample * 7 + index), second = mix(sample * 11 + index);
+            add(first, second);
+            original = original || ((low & context.bv_val(maskLow, 64u)) == context.bv_val(first & maskLow, 64u) && (high & context.bv_val(maskHigh, 64u)) == context.bv_val(second & maskHigh, 64u));
+        }
+        auto factored = makeRecoverySolver(context);
+        constrainStateCandidates(factored, candidates, low, high);
+        auto check = makeRecoverySolver(context);
+        check.add(original != z3::mk_and(factored.assertions()));
+        require(check.check() == z3::unsat, "factoring candidates changes the accepted states");
+    }
 }
 
 static void rawRngMatchesFloatCalls() {
@@ -78,7 +126,7 @@ static void rawRngMatchesFloatCalls() {
 
 static void cancellationInterruptsTheSolver() {
     z3::context context;
-    z3::solver solver(context);
+    auto solver = makeRecoverySolver(context);
     constexpr size_t pigeons = 33, holes = 32;
     std::vector<std::vector<z3::expr>> assignments;
     for (size_t pigeon = 0; pigeon < pigeons; pigeon++) {
@@ -121,6 +169,8 @@ int main() {
     require(!bounded.expired() && bounded.timeoutMillis(60000) <= 1000, "solver timeout exceeds remaining budget");
     require(bounded.timeoutMillis(25) <= 25, "solver timeout exceeds per-check limit");
     rawRngMatchesFloatCalls();
+    positionalBoundsPreserveEveryCompletion();
+    factoredCandidatesPreserveTheOriginalConstraint();
     cancellationInterruptsTheSolver();
     std::cout << "validated 16384 raw RNG cases, threshold boundaries, and solver cancellation\n";
 }

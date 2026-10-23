@@ -4,6 +4,10 @@
 #include <thread>
 #include <z3++.h>
 
+inline z3::solver makeRecoverySolver(z3::context& context) {
+    return z3::tactic(context, "qfbv").mk_solver();
+}
+
 class SolverTimeBudget {
     std::chrono::steady_clock::time_point deadline;
 public:
