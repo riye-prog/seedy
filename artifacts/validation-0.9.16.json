@@ -1,0 +1,73 @@
+{
+  "version": "0.9.16",
+  "jars": [
+    {
+      "version": "26.2",
+      "jar": "seedy-0.9.16+26.2.jar",
+      "bytes": 38091906,
+      "sha256": "4a671e70bcd0a347ccd81571a5ea8dd3c8d2c7d60f6fb4618555ae7a35099d1c",
+      "tests": 64,
+      "failures": 0,
+      "native_libraries": 16
+    },
+    {
+      "version": "26.3",
+      "jar": "seedy-0.9.16+26.3.jar",
+      "bytes": 38091104,
+      "sha256": "c0ff0cf8a54573f6275a54b65b9dfb7691087797327a1181f9c7bc294819d99e",
+      "tests": 63,
+      "failures": 0,
+      "native_libraries": 16
+    }
+  ],
+  "native_libraries": {
+    "natives/macos-arm64/libseedycrack.dylib": "078d9e021a34c9e694ab28f7aa0c0a7f1a2d8ceb5cdc8e67e4fb33d292ea0763",
+    "natives/macos-arm64/libseedynether.dylib": "dae4efeeebc044f6aa8428e3c5dda04d635c327dcf97dbcb2f287b2879f98dac",
+    "natives/macos-arm64/libz3.dylib": "31123abc706af7785f2e8c1ac0fdffb521d07216333b12fe81ac37f22864ffb9",
+    "natives/macos-universal/libseedy.dylib": "f9339ca94e9503a767c093b2c610f1e4d7a147a475b83e52e27f3047da8d437b",
+    "natives/macos-x86_64/libseedycrack.dylib": "bf69f65e3e895f477975758c54d76431fe27a2b18860f80f71bedeedbeecfcfb",
+    "natives/macos-x86_64/libseedynether.dylib": "0f5241d8707fc9e9836c90e4ee5d26d84a2449ba17f637777e408ce388b419bc",
+    "natives/macos-x86_64/libz3.dylib": "78686e3843d72e0eee7073edc0b3ccb87dbf84fdf04658bafe296ebc6ca7eb4e",
+    "natives/windows-x86_64/libgcc_s_seh-1.dll": "d7e343dd266747177c3699bc3201ea36eceef158e98530e089263bc55bb2a6d7",
+    "natives/windows-x86_64/libgmp-10.dll": "37248cda33845e7c5c35a574e57da762dd0a8268f0270d179f30a33746809681",
+    "natives/windows-x86_64/libgomp-1.dll": "2b5d851adc50f14a824a6de902d61ab67fbaee70dfe131850af842049a5612ee",
+    "natives/windows-x86_64/libstdc++-6.dll": "494bd9045948198ef4d3bc838c7362d4cfd49c890b439c096b1817aa7c7fa6ff",
+    "natives/windows-x86_64/libwinpthread-1.dll": "72bf8802de3a99d28f0bc2db9a11f281a9f9f3fa83dab2bc67e69fac3bd3d9c0",
+    "natives/windows-x86_64/libz3.dll": "bfa77e7ad5c1d9015043eafa71e034a68b570a13c2749d1aa8b6e37bbbb67131",
+    "natives/windows-x86_64/seedy.dll": "c6ac9c4f8f26e02346f665cb49a604c961a4a5823708c8371739f86c3fb6a530",
+    "natives/windows-x86_64/seedycrack.dll": "c477d60eabe507b0aa60b7841a58e08c49be2800baa51e85b16e1684edc744d5",
+    "natives/windows-x86_64/seedynether.dll": "faa86b997c70c7546be3b85442db4769817ffb4beac0c95dad613d0e66f6754d"
+  },
+  "validation": {
+    "native_gui_interactions": "passed",
+    "kernel_equivalence": "passed",
+    "solver_constraints_and_cancellation": "passed",
+    "nether_recovery_after_three_stop_restart_cycles": "hash_verified",
+    "nether_stop_ms": [
+      0.11,
+      0.07,
+      0.14
+    ],
+    "overworld_bridge_stop_ms": [
+      232,
+      130,
+      321
+    ],
+    "overworld_stop_observations": 2102510,
+    "overworld_antixray_mode_1_packet_replay": {
+      "minecraft": "26.3",
+      "chunks": 1000,
+      "visible_raw_ore": 8,
+      "hash_verified": true,
+      "seconds": 306.00859825,
+      "concurrent_builds": true
+    },
+    "map_native_cpu_frame_ms": 2.06759,
+    "map_preview_vertices": 1021964,
+    "overlay_native_cpu_frame_ms": 0.00490222,
+    "macos_gui_signature_and_load": "passed",
+    "minecraft_client_launched": false,
+    "live_fps_measured": false,
+    "windows_native_execution": false
+  }
+}
