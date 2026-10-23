@@ -26,9 +26,17 @@ public final class SeedyClient implements ClientModInitializer {
     public static boolean matchesHudToggle(KeyEvent event) { return hudToggle != null && hudToggle.matches(event); }
     public static void rescan() { COLLECTOR.rescan(); BedrockRecovery.INSTANCE.rescan(); }
     public static int pendingChunks() { return COLLECTOR.pending(); }
+    record Controls(KeyMapping panel, KeyMapping overlay) { }
+    static Controls createControls() {
+        var category = KeyMapping.Category.register(Identifier.fromNamespaceAndPath("seedy", "controls"));
+        return new Controls(
+            new KeyMapping("key.seedy.toggle", InputConstants.KEY_F8, category),
+            new KeyMapping("key.seedy.hud", InputConstants.KEY_F9, category));
+    }
     @Override public void onInitializeClient() {
-        toggle = KeyMappingHelper.registerKeyMapping(new KeyMapping("key.seedy.toggle", InputConstants.KEY_F8, KeyMapping.Category.register(Identifier.fromNamespaceAndPath("seedy", "controls"))));
-        hudToggle = KeyMappingHelper.registerKeyMapping(new KeyMapping("key.seedy.hud", InputConstants.KEY_F9, KeyMapping.Category.register(Identifier.fromNamespaceAndPath("seedy", "controls"))));
+        var controls = createControls();
+        toggle = KeyMappingHelper.registerKeyMapping(controls.panel());
+        hudToggle = KeyMappingHelper.registerKeyMapping(controls.overlay());
         ClientCommandRegistrationCallback.EVENT.register((dispatcher, registry) -> dispatcher.register(literal("seedy").executes(context -> {
             Minecraft.getInstance().execute(() -> Minecraft.getInstance().gui.setScreen(new OverlayScreen()));
             return 1;
