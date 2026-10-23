@@ -457,6 +457,9 @@ public final class Workbench implements AutoCloseable {
         state.addProperty("patternRawBlocks", BedrockRecovery.INSTANCE.rawBlocks());
         state.addProperty("patternOreCandidates", BedrockRecovery.INSTANCE.oreCandidates());
         state.addProperty("patternRawChunks", BedrockRecovery.INSTANCE.rawChunks());
+        state.addProperty("patternConflictingRawBlocks", BedrockRecovery.INSTANCE.conflictingRawBlocks());
+        state.addProperty("patternConflictingRawChunks", BedrockRecovery.INSTANCE.conflictingRawChunks());
+        state.addProperty("patternDataConflict", BedrockRecovery.INSTANCE.hasConflictingRawData());
         state.addProperty("patternCollectionProgress", BedrockRecovery.INSTANCE.collectionProgress());
         state.addProperty("patternRunning", BedrockRecovery.INSTANCE.running());
         state.addProperty("patternCanTry", BedrockRecovery.INSTANCE.canTry());
@@ -488,6 +491,9 @@ public final class Workbench implements AutoCloseable {
         state.addProperty("gameVersion", gameVersion);
         var server = client.getCurrentServer();
         state.addProperty("serverVersion", server == null ? client.hasSingleplayerServer() ? gameVersion + " (local)" : "Not reported" : server.version == null ? "Not reported" : server.version.getString());
+        String protocolTarget = net.fabricmc.loader.api.FabricLoader.getInstance().isModLoaded("viafabricplus") ? dev.seedy.recovery.WorldVersionCheck.translationTarget() : "";
+        state.addProperty("protocolTargetVersion", protocolTarget);
+        state.addProperty("generationWarning", dev.seedy.recovery.WorldVersionCheck.warning(generationVersion, protocolTarget.isEmpty() ? state.get("serverVersion").getAsString() : protocolTarget));
         state.addProperty("x", client.player == null ? 0 : client.player.getBlockX());
         state.addProperty("y", client.player == null ? 64 : client.player.getBlockY());
         state.addProperty("z", client.player == null ? 0 : client.player.getBlockZ());

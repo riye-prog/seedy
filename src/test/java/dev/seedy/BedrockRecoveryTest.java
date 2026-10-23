@@ -16,6 +16,7 @@ import org.junit.jupiter.api.Test;
 import static org.junit.jupiter.api.Assertions.assertArrayEquals;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 
 class BedrockRecoveryTest {
     @BeforeAll static void bootstrap() { SharedConstants.tryDetectVersion(); Bootstrap.bootStrap(); }
@@ -84,6 +85,43 @@ class BedrockRecoveryTest {
         assertEquals(2, BedrockRecovery.classify(Blocks.COPPER_ORE, 0));
         assertEquals(3, BedrockRecovery.classify(Blocks.TUFF, -30));
         assertEquals(3, BedrockRecovery.classify(Blocks.GRANITE, 20));
+    }
+
+    @Test void invalidRawPatternsTrackRefreshAndReset() {
+        var recovery = BedrockRecovery.INSTANCE;
+        var factory = PalettedContainerFactory.create((RegistryAccess)WorldgenAdapter.registries());
+        recovery.reset(1L);
+        try {
+            ProtoChunk last = null;
+            for (int x = 0; x < 4; x++) {
+                var chunk = new ProtoChunk(new ChunkPos(x, 0), UpgradeData.EMPTY, LevelHeightAccessor.create(-64, 384), factory, null);
+                chunk.setBlockState(new BlockPos(x * 16, -30, 0), Blocks.RAW_COPPER_BLOCK.defaultBlockState(), 0);
+                chunk.setBlockState(new BlockPos(x * 16 + 1, 20, 0), Blocks.RAW_IRON_BLOCK.defaultBlockState(), 0);
+                recovery.scan(chunk);
+                last = chunk;
+            }
+            assertEquals(8, recovery.conflictingRawBlocks());
+            assertEquals(4, recovery.conflictingRawChunks());
+            assertTrue(recovery.hasConflictingRawData());
+            recovery.scan(last);
+            assertEquals(8, recovery.conflictingRawBlocks());
+            last.setBlockState(new BlockPos(48, -30, 0), Blocks.STONE.defaultBlockState(), 0);
+            last.setBlockState(new BlockPos(49, 20, 0), Blocks.STONE.defaultBlockState(), 0);
+            recovery.scan(last);
+            assertEquals(6, recovery.conflictingRawBlocks());
+            assertEquals(3, recovery.conflictingRawChunks());
+            assertFalse(recovery.hasConflictingRawData());
+        } finally { recovery.reset(null); }
+        assertEquals(0, recovery.conflictingRawBlocks());
+    }
+
+    @Test void rawHeightDiagnosticsKeepNaturalVeinBoundaries() {
+        assertFalse(BedrockRecovery.conflictingRaw(Blocks.RAW_IRON_BLOCK, -60));
+        assertFalse(BedrockRecovery.conflictingRaw(Blocks.RAW_IRON_BLOCK, -8));
+        assertFalse(BedrockRecovery.conflictingRaw(Blocks.RAW_COPPER_BLOCK, 0));
+        assertFalse(BedrockRecovery.conflictingRaw(Blocks.RAW_COPPER_BLOCK, 50));
+        assertTrue(BedrockRecovery.conflictingRaw(Blocks.RAW_COPPER_BLOCK, -1));
+        assertTrue(BedrockRecovery.conflictingRaw(Blocks.RAW_IRON_BLOCK, 20));
     }
 
     private static long entry(int x, int y, int z, int type) {

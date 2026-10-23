@@ -212,7 +212,11 @@ static void recoveryPanel(Json &command) {
         ImGui::EndCombo();
     }
     ImGui::TextDisabled("Client %s    ·    Server reports %s", state.value("gameVersion", "").c_str(), state.value("serverVersion", "Not reported").c_str());
+    auto protocolTarget = state.value("protocolTargetVersion", "");
+    if (!protocolTarget.empty()) ImGui::TextDisabled("Protocol target: %s", protocolTarget.c_str());
     ImGui::TextDisabled("Choose the version that generated these chunks; protocol translation may hide it.");
+    auto generationWarning = state.value("generationWarning", "");
+    if (!generationWarning.empty()) ImGui::TextWrapped("%s", generationWarning.c_str());
     bool versionMatches = generationVersion == state.value("gameVersion", "");
     if (!versionMatches) ImGui::TextWrapped("Use the Seedy jar for this world generation version before recovering from structures or locating them.");
     ImGui::Separator();
@@ -232,6 +236,9 @@ static void recoveryPanel(Json &command) {
     ImGui::TextUnformatted("Loaded block patterns");
     ImGui::SameLine();
     ImGui::TextDisabled("%d chunks  ·  %d raw iron/copper blocks in %d chunks  ·  %d ore candidates", state.value("patternChunks", 0), state.value("patternRawBlocks", 0), state.value("patternRawChunks", 0), state.value("patternOreCandidates", 0));
+    if (state.value("patternDataConflict", false)) {
+        ImGui::TextWrapped("%d raw blocks in %d chunks fall outside vanilla vein heights. This sample cannot be trusted for block recovery.", state.value("patternConflictingRawBlocks", 0), state.value("patternConflictingRawChunks", 0));
+    }
     if (state.value("patternRunning", false)) {
         ImGui::TextDisabled("Pass %d / %d  ·  %s", state.value("patternPass", 1), state.value("patternPassCount", 4), state.value("patternPassSample", "").c_str());
         auto previousPass = state.value("patternPreviousPass", "");
@@ -255,9 +262,11 @@ static void recoveryPanel(Json &command) {
         if (eta >= 0) ImGui::TextDisabled("%s elapsed  ·  estimated full scan: %s left", timeLabel(elapsed).c_str(), timeLabel(eta).c_str());
         else ImGui::TextDisabled("%s elapsed", timeLabel(elapsed).c_str());
         ImGui::TextDisabled("Stage %d / 8  ·  %s in this stage", state.value("patternStage", 1), timeLabel(state.value("patternStageSeconds", 0L)).c_str());
+        ImGui::TextDisabled("Random-state limit: 3 minutes per pass  ·  Total search limit: 10 minutes");
         if (state.value("patternRejectedStates", 0) > 0) ImGui::TextDisabled("%d random states rejected", state.value("patternRejectedStates", 0));
     } else if (state.value("patternPass", 0) > 0) {
-        ImGui::TextDisabled("Last check: %s  ·  %d passes", timeLabel(state.value("patternElapsedSeconds", 0L)).c_str(), state.value("patternPass", 0));
+        int passes = state.value("patternPass", 0);
+        ImGui::TextDisabled("Last check: %s  ·  %d %s", timeLabel(state.value("patternElapsedSeconds", 0L)).c_str(), passes, passes == 1 ? "pass" : "passes");
     }
     ImGui::BeginDisabled(!state.value("patternCanTry", false));
     if (ImGui::Button("Try current data")) command = {{"action", "tryBlockRecovery"}};

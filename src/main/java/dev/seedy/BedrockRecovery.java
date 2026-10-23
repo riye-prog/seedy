@@ -3,7 +3,12 @@ package dev.seedy;
 import bedrock.generated.BedrockNative;
 import bedrock.generated.block_entry;
 import dev.seedy.recovery.BlockSearchProgress;
+import dev.seedy.recovery.RecoveryBudget;
+import dev.seedy.recovery.RecoveryDiagnostics;
 import dev.seedy.recovery.SeedHash;
+import com.google.gson.JsonObject;
+import com.google.gson.JsonParser;
+import net.fabricmc.loader.api.FabricLoader;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.multiplayer.ClientLevel;
 import net.minecraft.core.BlockPos;
@@ -15,6 +20,7 @@ import net.minecraft.world.level.chunk.ChunkAccess;
 import java.io.IOException;
 import java.lang.foreign.Arena;
 import java.lang.foreign.MemorySegment;
+import java.time.Duration;
 import java.util.ArrayDeque;
 import java.util.Arrays;
 import java.util.HashSet;
@@ -37,6 +43,7 @@ public final class BedrockRecovery implements AutoCloseable {
     private final Map<Long, ChunkSample> samples = new LinkedHashMap<>();
     private final ThreadLocal<String> nativeFailure = new ThreadLocal<>();
     private final BlockSearchProgress progress = new BlockSearchProgress();
+    private final RecoveryBudget budget = new RecoveryBudget(Duration.ofMinutes(10));
     private static final org.slf4j.Logger LOGGER = org.slf4j.LoggerFactory.getLogger("Seedy");
     private final ExecutorService worker = Executors.newSingleThreadExecutor(task -> {
         Thread thread = Thread.ofPlatform().daemon().name("seedy-bedrock-recovery").unstarted(task);
@@ -48,6 +55,8 @@ public final class BedrockRecovery implements AutoCloseable {
     private int oreCount;
     private int evidenceChunks;
     private int rawChunks;
+    private int conflictingRawCount;
+    private int conflictingRawChunks;
     private int ticks;
     private int lastScanTick;
     private int lastAttemptEvidenceChunks;
@@ -80,6 +89,7 @@ public final class BedrockRecovery implements AutoCloseable {
         oreCount = 0;
         evidenceChunks = 0;
         rawChunks = 0;
+        conflictingRawCount = conflictingRawChunks = 0;
         ticks = 0;
         lastScanTick = 0;
         lastAttemptEvidenceChunks = 0;
@@ -89,6 +99,7 @@ public final class BedrockRecovery implements AutoCloseable {
         cancelRequested = true;
         runningGeneration = -1;
         progress.reset();
+        budget.finish();
         found = false;
         nativeMatched = false;
         status = connected ? "Collecting loaded Overworld chunks" : "Waiting for a world";
@@ -144,6 +155,10 @@ public final class BedrockRecovery implements AutoCloseable {
             }
         }
         if (attempted && !running && (evidenceChunks >= lastAttemptEvidenceChunks + 64 || rawCount >= lastAttemptRawBlocks + 12 && rawChunks >= lastAttemptRawChunks + 4)) attempted = false;
+        if (!running && hasConflictingRawData()) {
+            status = "Raw block data conflicts with vanilla vein heights; anti-xray or custom generation may be changing chunks";
+            return;
+        }
         if (!running && !attempted && queue.isEmpty() && ticks - lastScanTick >= 100) {
             if (evidenceChunks >= MIN_EVIDENCE_CHUNKS && rawCount >= MIN_RAW_BLOCKS && rawChunks >= MIN_RAW_CHUNKS) status = "Ready to check loaded block data";
             else if (scanned.size() >= 256) status = rawCount == 0 ? "No raw ore seen; anti-xray or changed ore generation may limit this method" : "Collecting more ore evidence near spawn";
@@ -155,6 +170,7 @@ public final class BedrockRecovery implements AutoCloseable {
         int count = 0;
         int raw = 0;
         int ore = 0;
+        int conflictingRaw = 0;
         int minX = chunk.getPos().getMinBlockX();
         int minZ = chunk.getPos().getMinBlockZ();
         BlockPos.MutableBlockPos position = new BlockPos.MutableBlockPos();
@@ -162,7 +178,9 @@ public final class BedrockRecovery implements AutoCloseable {
             int x = minX + dx;
             int z = minZ + dz;
             for (int y = -63; y <= 50; y++) {
-                int type = classify(chunk.getBlockState(position.set(x, y, z)).getBlock(), y);
+                Block block = chunk.getBlockState(position.set(x, y, z)).getBlock();
+                if (conflictingRaw(block, y)) conflictingRaw++;
+                int type = classify(block, y);
                 if (type < 0) continue;
                 if (count == entries.length) entries = Arrays.copyOf(entries, entries.length * 2);
                 entries[count++] = ((long)x & COORDINATE_MASK) << 38 | ((long)z & COORDINATE_MASK) << 12 | ((long)(y + 64) & 255) << 4 | type;
@@ -170,9 +188,11 @@ public final class BedrockRecovery implements AutoCloseable {
                 if (type == 2) ore++;
             }
         }
-        ChunkSample next = new ChunkSample(Arrays.copyOf(entries, count), raw, ore);
+        ChunkSample next = new ChunkSample(Arrays.copyOf(entries, count), raw, ore, conflictingRaw);
         long key = chunk.getPos().pack();
         ChunkSample previous = samples.put(key, next);
+        conflictingRawCount += conflictingRaw - (previous == null ? 0 : previous.conflictingRaw());
+        conflictingRawChunks += (conflictingRaw > 0 ? 1 : 0) - (previous != null && previous.conflictingRaw() > 0 ? 1 : 0);
         scanned.add(key);
         observationCount += count - (previous == null ? 0 : previous.entries().length);
         rawCount += raw - (previous == null ? 0 : previous.raw());
@@ -181,6 +201,10 @@ public final class BedrockRecovery implements AutoCloseable {
         rawChunks += (raw > 0 ? 1 : 0) - (previous != null && previous.raw() > 0 ? 1 : 0);
         if (previous != null && !Arrays.equals(previous.entries(), next.entries())) attempted = false;
         if (!running && !attempted) status = "Scanning loaded chunks";
+    }
+
+    static boolean conflictingRaw(Block block, int y) {
+        return block == Blocks.RAW_IRON_BLOCK && (y < -60 || y > -8) || block == Blocks.RAW_COPPER_BLOCK && (y < 0 || y > 50);
     }
 
     static int classify(Block block, int y) {
@@ -261,6 +285,7 @@ public final class BedrockRecovery implements AutoCloseable {
         lastAttemptRawBlocks = rawCount;
         lastAttemptRawChunks = rawChunks;
         running = true;
+        budget.start(System.nanoTime());
         status = "Cracking from loaded blocks";
         int runGeneration = generation;
         runningGeneration = runGeneration;
@@ -273,6 +298,15 @@ public final class BedrockRecovery implements AutoCloseable {
             offset += sample.entries().length;
         }
         LOGGER.info("Starting block recovery: {} chunks, {} raw blocks, {} observations", evidenceChunks, rawCount, entries.length);
+        var snapshot = JsonParser.parseString(Workbench.INSTANCE.snapshot()).getAsJsonObject();
+        var diagnostic = new JsonObject();
+        for (String key : new String[]{"gameVersion", "generationVersion", "clientVersion", "serverVersion", "serverBrand", "protocolTargetVersion", "dimension"}) {
+            if (snapshot.has(key)) diagnostic.add(key, snapshot.get(key));
+        }
+        diagnostic.addProperty("seedHash", expectedHash);
+        diagnostic.addProperty("chunks", evidenceChunks);
+        diagnostic.addProperty("rawBlocks", rawCount);
+        diagnostic.addProperty("sample", "unfiltered collector observations");
         worker.submit(() -> {
             try {
                 nativeFailure.remove();
@@ -286,7 +320,7 @@ public final class BedrockRecovery implements AutoCloseable {
                     int[] modes = {63, 63, 31, 31};
                     int[] sources = {0, 1, 0, 1};
                     for (int index = 0; index < modes.length; index++) {
-                        if (generation != runGeneration || nativeMatched || cancelRequested || Workbench.INSTANCE.hasVerifiedSeed()) break;
+                        if (generation != runGeneration || nativeMatched || cancelRequested || !budget.allows(System.nanoTime()) || Workbench.INSTANCE.hasVerifiedSeed()) break;
                         nativeFailure.remove();
                         String description = (sources[index] == 0 ? "reduced sample" : "full sample") + ((modes[index] & 32) != 0 ? ", cautious checks" : ", full vein checks");
                         progress.beginPass(index + 1, description, System.nanoTime());
@@ -308,6 +342,7 @@ public final class BedrockRecovery implements AutoCloseable {
                     String failure = nativeFailure.get();
                     if (Workbench.INSTANCE.hasVerifiedSeed()) status = "Seed verified from nearby structures";
                     else if (cancelRequested) status = "Search stopped";
+                    else if (budget.expired()) status = "Search reached its 10-minute limit; block data may be hidden, modified, or from a different generation version";
                     else if (nativeMatched) status = "Seed found; verifying";
                     else status = failure == null ? "No matching seed from this block sample" : failure;
                 }
@@ -315,8 +350,19 @@ public final class BedrockRecovery implements AutoCloseable {
                 if (generation == runGeneration) status = "Block-pattern search failed: " + error.getClass().getSimpleName();
                 LOGGER.error("Block-pattern recovery failed", error);
             } finally {
+                if (generation == runGeneration && !nativeMatched && !found && !cancelRequested) {
+                    try {
+                        diagnostic.addProperty("failure", status);
+                        diagnostic.addProperty("pass", progress.view(System.nanoTime()).pass());
+                        RecoveryDiagnostics.write(FabricLoader.getInstance().getConfigDir().resolve("seedy/recovery"), entries, diagnostic);
+                        LOGGER.info("Saved block recovery data to config/seedy/recovery for command-line diagnosis");
+                        status += ". Diagnostic saved in config/seedy/recovery";
+                    } catch (IOException | RuntimeException error) { LOGGER.warn("Could not save block recovery diagnostic", error); }
+                }
                 nativeFailure.remove();
                 if (generation == runGeneration) progress.finish(System.nanoTime());
+                budget.finish();
+                if (cancelRequested && generation == runGeneration) attempted = false;
                 runningGeneration = -1;
                 running = false;
             }
@@ -327,6 +373,7 @@ public final class BedrockRecovery implements AutoCloseable {
         if (!connected || expectedHash == null) throw new IllegalArgumentException("Join a world first.");
         if (Workbench.INSTANCE.hasVerifiedSeed()) throw new IllegalArgumentException("The seed is already verified.");
         if (running || !queue.isEmpty()) throw new IllegalArgumentException("Wait for loaded chunks to finish scanning.");
+        if (hasConflictingRawData()) throw new IllegalArgumentException("Raw blocks appear outside vanilla vein heights across several chunks. Anti-xray, placed blocks, or custom generation may be changing this data.");
         if (attempted) throw new IllegalArgumentException("The loaded block sample was already checked. Load more chunks first.");
         if (evidenceChunks < 64 || rawCount == 0) throw new IllegalArgumentException("There is not enough nearby block data to check yet.");
         startSearch();
@@ -363,11 +410,13 @@ public final class BedrockRecovery implements AutoCloseable {
         if (!"commands.bedrockcrack.foundWorldSeed".equals(key)) {
             if (!shouldContinueSearch() || INSTANCE.found) return;
             if ("commands.bedrockcrack.rawEvidence".equals(key) && values.length >= 2) LOGGER.info("Block recovery raw evidence: {} positions, {} initial exact checks", values[0], values[1]);
+            if ("commands.bedrockcrack.baseEvidenceMismatch".equals(key) && values.length >= 2) LOGGER.info("Block recovery state rejected: {} mismatches in {} reliable bedrock/deepslate observations", values[0], values[1]);
             if ("commands.bedrockcrack.relaxingOreEvidence".equals(key) || "commands.bedrockcrack.solverTimeLimit".equals(key)) {
                 LOGGER.info("Block recovery pass {}: {} ({} ore pattern groups relaxed)", INSTANCE.searchProgress().pass(), key.endsWith("solverTimeLimit") ? "solver time limit reached" : "ordinary ore patterns did not fit", values.length > 0 ? values[0] : 0);
             }
             if ("commands.bedrockcrack.Z3Unsat".equals(key)) INSTANCE.nativeFailure.set("This pass found no consistent random state");
-            if ("commands.bedrockcrack.Z3Failed".equals(key)) INSTANCE.nativeFailure.set("Could not resolve these block patterns");
+            if ("commands.bedrockcrack.solverBudgetExceeded".equals(key)) INSTANCE.nativeFailure.set("Random-state solver reached its 3-minute limit for this pass");
+            if ("commands.bedrockcrack.Z3Failed".equals(key) && INSTANCE.nativeFailure.get() == null) INSTANCE.nativeFailure.set("Could not resolve these block patterns");
             if ("commands.bedrockcrack.stateValidationFailed".equals(key)) INSTANCE.nativeFailure.set("No random state passed the block evidence checks");
             if (INSTANCE.progress.update(key, System.nanoTime())) {
                 var view = INSTANCE.searchProgress();
@@ -395,7 +444,7 @@ public final class BedrockRecovery implements AutoCloseable {
     }
 
     public static boolean shouldContinueSearch() {
-        return INSTANCE.running && !INSTANCE.cancelRequested && INSTANCE.runningGeneration == INSTANCE.generation && !Workbench.INSTANCE.hasVerifiedSeed();
+        return INSTANCE.running && !INSTANCE.cancelRequested && INSTANCE.runningGeneration == INSTANCE.generation && INSTANCE.budget.allows(System.nanoTime()) && !Workbench.INSTANCE.hasVerifiedSeed();
     }
 
     public int scannedChunks() { return scanned.size(); }
@@ -403,9 +452,12 @@ public final class BedrockRecovery implements AutoCloseable {
     public int rawBlocks() { return rawCount; }
     public int oreCandidates() { return oreCount; }
     public int rawChunks() { return rawChunks; }
-    private record ChunkSample(long[] entries, int raw, int ore) { }
+    public int conflictingRawBlocks() { return conflictingRawCount; }
+    public int conflictingRawChunks() { return conflictingRawChunks; }
+    public boolean hasConflictingRawData() { return conflictingRawCount >= 8 && conflictingRawChunks >= 4; }
+    private record ChunkSample(long[] entries, int raw, int ore, int conflictingRaw) { }
     public double collectionProgress() { return Math.min(1, Math.min((double)evidenceChunks / MIN_EVIDENCE_CHUNKS, Math.min((double)rawCount / MIN_RAW_BLOCKS, (double)rawChunks / MIN_RAW_CHUNKS))); }
-    public boolean canTry() { return connected && !running && !attempted && queue.isEmpty() && evidenceChunks >= 64 && rawCount > 0 && !Workbench.INSTANCE.hasVerifiedSeed(); }
+    public boolean canTry() { return connected && !running && !attempted && queue.isEmpty() && evidenceChunks >= 64 && rawCount > 0 && !hasConflictingRawData() && !Workbench.INSTANCE.hasVerifiedSeed(); }
     public boolean running() { return running; }
     public BlockSearchProgress.View searchProgress() { return progress.view(System.nanoTime()); }
     public String status() { return running && !cancelRequested ? searchProgress().phase() : status; }

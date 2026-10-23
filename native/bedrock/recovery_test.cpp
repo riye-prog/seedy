@@ -45,6 +45,10 @@ static void rawRngMatchesFloatCalls() {
         std::array<uint64_t, 6> numericStates{low, high, secondLow, secondHigh, thirdLow, thirdHigh};
         for (uint64_t sample = 0; sample < 256; sample++) {
             uint64_t position = mix(seed * 256 + sample);
+            uint32_t cutoff = static_cast<uint32_t>((sample * 65537) & 0xffffff);
+            bool below = (output(low ^ position, high) >> 40) < cutoff;
+            require(positionalChanceConstraint(states[0], states[1], position, cutoff, true).simplify().is_true() == below, "positive positional constraint differs from RNG output");
+            require(positionalChanceConstraint(states[0], states[1], position, cutoff, false).simplify().is_true() != below, "negative positional constraint differs from RNG output");
             uint64_t atLow = low ^ position, atHigh = high;
             float first = static_cast<float>(output(atLow, atHigh) >> 40) * 0x1.0p-24f;
             advance(atLow, atHigh);
@@ -110,6 +114,12 @@ static void cancellationInterruptsTheSolver() {
 }
 
 int main() {
+    SolverTimeBudget expired(std::chrono::milliseconds(0));
+    require(expired.expired(), "expired solver budget was treated as unlimited");
+    require(expired.timeoutMillis(60000) == 1, "expired solver budget disables Z3 timeout");
+    SolverTimeBudget bounded(std::chrono::milliseconds(1000));
+    require(!bounded.expired() && bounded.timeoutMillis(60000) <= 1000, "solver timeout exceeds remaining budget");
+    require(bounded.timeoutMillis(25) <= 25, "solver timeout exceeds per-check limit");
     rawRngMatchesFloatCalls();
     cancellationInterruptsTheSolver();
     std::cout << "validated 16384 raw RNG cases, threshold boundaries, and solver cancellation\n";

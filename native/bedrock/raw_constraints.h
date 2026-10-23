@@ -12,6 +12,14 @@ inline constexpr std::array<uint64_t, 3> rawOreLimits{
     floatProbabilityLimit(7, 10), floatProbabilityLimit(3, 10), floatProbabilityLimit(1, 50)
 };
 
+inline z3::expr positionalChanceConstraint(const z3::expr& low, const z3::expr& high, uint64_t position, uint32_t cutoff, bool expected) {
+    auto& context = low.ctx();
+    auto first = low ^ context.bv_val(position, 64u);
+    auto output = (first + high).rotate_left(17) + first;
+    auto result = z3::ult(z3::lshr(output, 40), context.bv_val(static_cast<uint64_t>(cutoff), 64u));
+    return expected ? result : !result;
+}
+
 inline bool rawOreMatches(const std::array<uint64_t, 6>& states, uint64_t position) {
     uint64_t low = position, high = 0;
     for (size_t call = 0; call < rawOreLimits.size(); call++) {

@@ -1,0 +1,68 @@
+{
+  "version": "0.9.14",
+  "validation": {
+    "minecraft_client_launched": false,
+    "method": "headless paper server, protocol chunk capture, then native command-line replay",
+    "paper_version": "26.2 build 134",
+    "chunks_per_capture": 1000,
+    "packet_rate_guard_disabled_for_headless_receiver": true,
+    "seed_supplied_to_solver": false,
+    "seed_hash_checked": true,
+    "test_hardware": "apple m3, 8 gb ram, 6 recovery threads"
+  },
+  "java_tests": {
+    "26.2": {
+      "passed": 56,
+      "failed": 0
+    },
+    "26.3": {
+      "passed": 56,
+      "failed": 0
+    }
+  },
+  "native_tests": {
+    "kernel_equivalence": "passed",
+    "rng_constraints_and_cancellation": "passed",
+    "panel_interaction": "passed"
+  },
+  "captures": {
+    "default": {
+      "chunks": 1000,
+      "observations": 4018555,
+      "raw": 214,
+      "invalidRaw": 0,
+      "binary_sha256": "0d35f336ba51e0a3534583a49477c2a9a2cd148325d7f347c91ed733372724cc",
+      "result": "correct world seed recovered on first cautious reduced-data pass",
+      "elapsed_seconds": 326.695,
+      "concurrent_local_builds": true,
+      "raw_positions_previously_used": 71,
+      "raw_positions_now_used": 214
+    },
+    "antixray1": {
+      "chunks": 1000,
+      "observations": 3869412,
+      "raw": 9,
+      "invalidRaw": 0,
+      "binary_sha256": "3829b3bcfbceee0c49f066948e19560946a9d9adda14d1e7a5ba0c65f0d62186",
+      "result": "incorrect internal state rejected; random-state solver stopped at its time limit",
+      "elapsed_seconds": 190.408,
+      "world_seed_recovered": false,
+      "raw_positions_previously_used": 0,
+      "raw_positions_now_used": 9
+    },
+    "antixray2": {
+      "chunks": 1000,
+      "observations": 4129532,
+      "raw": 891643,
+      "invalidRaw": 1036474,
+      "binary_sha256": "d7eb849f4fdfe6d131fcaf5f3e457f77892cf988378447944bebacac6e4e1d31",
+      "result": "received raw block pattern conflicts with vanilla vein heights",
+      "collector_conflict_check": "validated with chunk refresh/reset unit tests; packet counts independently measured"
+    }
+  },
+  "limitations": [
+    "headless packet replay does not exercise the minecraft client ui or protocol translation",
+    "no guarantee of recovery when blocks are hidden, fabricated, modified, or generated with different rules",
+    "timing includes concurrent local builds and is not a controlled speed comparison"
+  ]
+}

@@ -16,21 +16,26 @@ new_vein_loop = old_vein_loop + "\n\t\tif ((y < -60 || y > -8) && (y < 0 || y > 
 old_solver = "\tz3::solver solver(ctx);"
 old_first_solve = "\tauto sol1 = solve(xvs1, 1);"
 new_first_solve = """\tstd::vector<uint64_t> rawPositions;
-\tfor (auto [position, probability, raw] : xvs5) if (raw) rawPositions.push_back(position);
+\tif (mode & 16) for (auto [coordinate, type] : blocks) {
+\t\tif (type != RAW) continue;
+\t\tauto [x, y, z] = coordinate;
+\t\trawPositions.push_back(getSeed(x, y, z));
+\t}
 \tstd::sort(rawPositions.begin(), rawPositions.end());
 \trawPositions.erase(std::unique(rawPositions.begin(), rawPositions.end()), rawPositions.end());
-\tbool useRawConstraints = cautious && rawPositions.size() >= 16;
+\tbool useRawConstraints = cautious && !rawPositions.empty();
 \tauto sol1 = solve(xvs1, 1);"""
 old_raw_constraint = "\tif(sol5.size()) constrain(sol5, O8, O9);"
 new_raw_constraint = """\tconst std::array<z3::expr, 6> rawStates{O4, O5, O6, O7, O8, O9};
 \tsize_t rawChecks = std::min<size_t>(32, rawPositions.size());
 \tstd::vector<uint64_t> rawRefinements;
+\tstd::vector<std::tuple<unsigned int, uint64_t, uint32_t, bool>> baseRefinements;
 \tstd::vector<std::pair<uint64_t, uint64_t>> rejectedStates;
 \tunsigned int relaxedGroups = 0;
+\tSolverTimeBudget solverBudget(std::chrono::minutes(3));
 \tsendUpdate("commands.bedrockcrack.rawEvidence", false, static_cast<uint64_t>(rawPositions.size()), static_cast<uint64_t>(rawChecks));
 \tauto configureSolver = [&] {
 \t\tsolver.reset();
-\t\tsolver.set("timeout", useRawConstraints && relaxedGroups < 2 ? 60000u : 0u);
 \t\tif (sol1.size()) constrain(sol1, O0, O1);
 \t\tif (sol2.size()) constrain(sol2, O2, O3);
 \t\tif (relaxedGroups < 2 && sol3.size()) constrain(sol3, O4, O5);
@@ -38,13 +43,24 @@ new_raw_constraint = """\tconst std::array<z3::expr, 6> rawStates{O4, O5, O6, O7
 \t\tfor (size_t index = 0; index < rawChecks; index++)
 \t\t\tsolver.add(rawOreConstraint(rawStates, rawPositions[index * rawPositions.size() / rawChecks]));
 \t\tfor (uint64_t position : rawRefinements) solver.add(rawOreConstraint(rawStates, position));
+\t\tfor (auto [group, position, cutoff, expected] : baseRefinements)
+\t\t\tsolver.add(positionalChanceConstraint(group == 0 ? O0 : O2, group == 0 ? O1 : O3, position, cutoff, expected));
 \t\tfor (auto [low, high] : rejectedStates) solver.add(I0 != ctx.bv_val(low, 64u) || I1 != ctx.bv_val(high, 64u));
 \t};
 \tconfigureSolver();
 \tauto checkSolver = [&] {
 \t\twhile (shouldContinueSearch()) {
+\t\t\tif (solverBudget.expired()) {
+\t\t\t\tsendUpdate("commands.bedrockcrack.solverBudgetExceeded", false);
+\t\t\t\treturn z3::unknown;
+\t\t\t}
+\t\t\tsolver.set("timeout", solverBudget.timeoutMillis(useRawConstraints && relaxedGroups < 2 ? 60000u : 180000u));
 \t\t\tauto result = cancellableSolverCheck(solver, shouldContinueSearch);
 \t\t\tbool timedOut = result == z3::unknown && (solver.reason_unknown() == "timeout" || solver.reason_unknown() == "canceled");
+\t\t\tif (timedOut && shouldContinueSearch() && (solverBudget.expired() || !useRawConstraints || relaxedGroups == 2)) {
+\t\t\t\tsendUpdate("commands.bedrockcrack.solverBudgetExceeded", false);
+\t\t\t\treturn result;
+\t\t\t}
 \t\t\tif (!useRawConstraints || relaxedGroups == 2 || (result != z3::unsat && !timedOut)) return result;
 \t\t\tif (!shouldContinueSearch()) return z3::unknown;
 \t\t\trelaxedGroups++;
@@ -72,26 +88,32 @@ new_scan = """\tauto randomLong = [](uint64_t low, uint64_t high) {
 \t\thigh = std::rotl(difference, 28);
 \t};
 \tstd::vector<uint64_t> rawMismatches;
+\tstd::vector<std::tuple<unsigned int, uint64_t, uint32_t, bool>> baseMismatches;
 \tauto validate = [&](uint64_t modelLow, uint64_t modelHigh) {
-\t\tauto countErrors = [&](const auto& observations, uint64_t saltLow, uint64_t saltHigh) {
+\t\tbaseMismatches.clear();
+\t\tauto countErrors = [&](const auto& observations, uint64_t saltLow, uint64_t saltHigh, unsigned int group) {
 \t\t\tuint64_t low = modelLow ^ saltLow;
 \t\t\tuint64_t high = modelHigh ^ saltHigh;
 \t\t\tuint64_t first = randomLong(low, high);
 \t\t\tadvance(low, high);
 \t\t\tuint64_t second = randomLong(low, high);
-\t\t\tsize_t stride = std::max<size_t>(1, observations.size() / 4096);
+\t\t\tsize_t stride = group < 2 ? 1 : std::max<size_t>(1, observations.size() / 4096);
 \t\t\tsize_t errors = 0, checked = 0;
+\t\t\tsize_t refinements = 0;
 \t\t\tfor (size_t index = 0; index < observations.size(); index += stride) {
 \t\t\t\tauto [position, probability, expected] = observations[index];
+\t\t\t\tif (group == 1 && !expected) continue;
 \t\t\t\tuint32_t cutoff = static_cast<uint32_t>(std::ceil(probability * 16777216.0));
-\t\t\t\terrors += get<0>(first, second, position, cutoff) != expected;
+\t\t\t\tbool mismatch = get<0>(first, second, position, cutoff) != expected;
+\t\t\t\terrors += mismatch;
+\t\t\t\tif (mismatch && group < 2 && refinements++ < 16) baseMismatches.emplace_back(group, position, cutoff, expected);
 \t\t\t\tchecked++;
 \t\t\t}
 \t\t\treturn std::pair{errors, checked};
 \t\t};
-\t\tauto [bedrockErrors, bedrockChecked] = countErrors(xvs1, 13544455532117611141ull, 14185350335435586452ull);
-\t\tauto [deepslateErrors, deepslateChecked] = countErrors(xvs2, 10411719568726253007ull, 14964796469053385315ull);
-\t\tauto [veinErrors, veinChecked] = countErrors(xvs3, 11207227798492025197ull, 3091299299654006625ull);
+\t\tauto [bedrockErrors, bedrockChecked] = countErrors(xvs1, 13544455532117611141ull, 14185350335435586452ull, 0);
+\t\tauto [deepslateErrors, deepslateChecked] = countErrors(xvs2, 10411719568726253007ull, 14964796469053385315ull, 1);
+\t\tauto [veinErrors, veinChecked] = countErrors(xvs3, 11207227798492025197ull, 3091299299654006625ull, 2);
 \t\tsize_t errors = bedrockErrors + deepslateErrors;
 \t\tsize_t checked = bedrockChecked + deepslateChecked;
 \t\tuint64_t oreLow = modelLow ^ 11207227798492025197ull;
@@ -113,7 +135,7 @@ new_scan = """\tauto randomLong = [](uint64_t low, uint64_t high) {
 \tfor (uint64_t index = 0; index < candidateLimit && shouldContinueSearch(); index++) {
 \t\tsendUpdate("commands.bedrockcrack.validatingRandomState", false);
 \t\tauto [errors, checked, veinErrors, veinChecked] = validate(i0, i1);
-\t\tbool baseMatches = checked < 1024 || errors <= std::max<size_t>(8, checked / 100);
+\t\tbool baseMatches = errors == 0;
 \t\tbool veinMatches = useRawConstraints || veinChecked < 256 || veinErrors * 50 <= veinChecked * 9;
 \t\tif (baseMatches && veinMatches && rawMismatches.empty()) {
 \t\t\tsendUpdate("commands.bedrockcrack.crackedRandomStateRandom", false, i0, i1);
@@ -121,7 +143,13 @@ new_scan = """\tauto randomLong = [](uint64_t low, uint64_t high) {
 \t\t\treturn;
 \t\t}
 \t\tsendUpdate("commands.bedrockcrack.stateCandidateRejected", false, index + 1, static_cast<uint64_t>(veinErrors), static_cast<uint64_t>(veinChecked));
+\t\tsendUpdate("commands.bedrockcrack.baseEvidenceMismatch", false, static_cast<uint64_t>(errors), static_cast<uint64_t>(checked));
 \t\tif (index + 1 == candidateLimit) break;
+\t\tfor (auto refinement : baseMismatches) {
+\t\t\tbaseRefinements.push_back(refinement);
+\t\t\tauto [group, position, cutoff, expected] = refinement;
+\t\t\tsolver.add(positionalChanceConstraint(group == 0 ? O0 : O2, group == 0 ? O1 : O3, position, cutoff, expected));
+\t\t}
 \t\tsize_t refinements = std::min<size_t>(16, rawMismatches.size());
 \t\tfor (size_t added = 0; added < refinements; added++)
 \t\t{
