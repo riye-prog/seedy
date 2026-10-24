@@ -1,0 +1,179 @@
+{
+  "version": "0.9.18",
+  "baseline_commit": "8bb576c4c53eef83c9f4403a770024486e92cbe5",
+  "scope": "command-line tests and offscreen Vulkan rendering; no Minecraft instance launched; live game FPS not measured",
+  "minecraft": {
+    "26.2": {
+      "jar": "seedy-0.9.18+26.2.jar",
+      "sha256": "a831ae04aece0914896649253fb8e9c1c4ebf044ff5c9cea92d8ef6f9defad59",
+      "bytes": 38095380,
+      "tests": 69,
+      "failures": 0,
+      "native_files": 16,
+      "changed_natives": [
+        "natives/macos-universal/libseedy.dylib",
+        "natives/windows-x86_64/seedy.dll"
+      ],
+      "solver_binaries_unchanged": true
+    },
+    "26.3": {
+      "jar": "seedy-0.9.18+26.3.jar",
+      "sha256": "ef7d5d58b897812be8a6b227b381205e3910f7e2dde7bc17785d57903509b4b7",
+      "bytes": 38094583,
+      "tests": 68,
+      "failures": 0,
+      "native_files": 16,
+      "changed_natives": [
+        "natives/macos-universal/libseedy.dylib",
+        "natives/windows-x86_64/seedy.dll"
+      ],
+      "solver_binaries_unchanged": true
+    }
+  },
+  "native_sha256": {
+    "natives/macos-arm64/libseedycrack.dylib": "078d9e021a34c9e694ab28f7aa0c0a7f1a2d8ceb5cdc8e67e4fb33d292ea0763",
+    "natives/macos-arm64/libseedynether.dylib": "dae4efeeebc044f6aa8428e3c5dda04d635c327dcf97dbcb2f287b2879f98dac",
+    "natives/macos-arm64/libz3.dylib": "31123abc706af7785f2e8c1ac0fdffb521d07216333b12fe81ac37f22864ffb9",
+    "natives/macos-universal/libseedy.dylib": "ff032f9a86297b2ce50a1bd3105521f4f4eaff7c53b3befd9f194838ad3143d8",
+    "natives/macos-x86_64/libseedycrack.dylib": "bf69f65e3e895f477975758c54d76431fe27a2b18860f80f71bedeedbeecfcfb",
+    "natives/macos-x86_64/libseedynether.dylib": "0f5241d8707fc9e9836c90e4ee5d26d84a2449ba17f637777e408ce388b419bc",
+    "natives/macos-x86_64/libz3.dylib": "78686e3843d72e0eee7073edc0b3ccb87dbf84fdf04658bafe296ebc6ca7eb4e",
+    "natives/windows-x86_64/libgcc_s_seh-1.dll": "d7e343dd266747177c3699bc3201ea36eceef158e98530e089263bc55bb2a6d7",
+    "natives/windows-x86_64/libgmp-10.dll": "37248cda33845e7c5c35a574e57da762dd0a8268f0270d179f30a33746809681",
+    "natives/windows-x86_64/libgomp-1.dll": "2b5d851adc50f14a824a6de902d61ab67fbaee70dfe131850af842049a5612ee",
+    "natives/windows-x86_64/libstdc++-6.dll": "494bd9045948198ef4d3bc838c7362d4cfd49c890b439c096b1817aa7c7fa6ff",
+    "natives/windows-x86_64/libwinpthread-1.dll": "72bf8802de3a99d28f0bc2db9a11f281a9f9f3fa83dab2bc67e69fac3bd3d9c0",
+    "natives/windows-x86_64/libz3.dll": "bfa77e7ad5c1d9015043eafa71e034a68b570a13c2749d1aa8b6e37bbbb67131",
+    "natives/windows-x86_64/seedy.dll": "f6347cb115d9a08f3d98053a526a8bd114764b06ac05e3ed6c1ed097926361bf",
+    "natives/windows-x86_64/seedycrack.dll": "c477d60eabe507b0aa60b7841a58e08c49be2800baa51e85b16e1684edc744d5",
+    "natives/windows-x86_64/seedynether.dll": "faa86b997c70c7546be3b85442db4769817ffb4beac0c95dad613d0e66f6754d"
+  },
+  "native_checks": {
+    "macos_universal": "built for arm64 and x86_64; ad hoc signature verified",
+    "windows_x86_64": "cross-compiled; runtime not tested on Windows",
+    "interaction": "passed button, navigation, drag, close, settings, loot, outline color and clickthrough checks"
+  },
+  "gpu_benchmark": {
+    "baseline": {
+      "rounds": [
+        {
+          "cpu_record_median_ms": 0.102416,
+          "cpu_record_p95_ms": 0.314083,
+          "extra_fence_waits": 300,
+          "extra_queue_submits": 300,
+          "framebuffer_creations": 300,
+          "frames": 300,
+          "gpu": "Apple M3",
+          "gpu_median_ms": 0.301792,
+          "gpu_p95_ms": 0.3995,
+          "height": 1964,
+          "rendered_pixels_per_frame": 5939136,
+          "width": 3024
+        },
+        {
+          "cpu_record_median_ms": 0.14425,
+          "cpu_record_p95_ms": 0.330208,
+          "extra_fence_waits": 300,
+          "extra_queue_submits": 300,
+          "framebuffer_creations": 300,
+          "frames": 300,
+          "gpu": "Apple M3",
+          "gpu_median_ms": 0.305833,
+          "gpu_p95_ms": 0.653958,
+          "height": 1964,
+          "rendered_pixels_per_frame": 5939136,
+          "width": 3024
+        },
+        {
+          "cpu_record_median_ms": 0.06025,
+          "cpu_record_p95_ms": 0.368958,
+          "extra_fence_waits": 300,
+          "extra_queue_submits": 300,
+          "framebuffer_creations": 300,
+          "frames": 300,
+          "gpu": "Apple M3",
+          "gpu_median_ms": 0.307625,
+          "gpu_p95_ms": 0.414208,
+          "height": 1964,
+          "rendered_pixels_per_frame": 5939136,
+          "width": 3024
+        }
+      ],
+      "median_of_gpu_medians_ms": 0.305833
+    },
+    "current": {
+      "rounds": [
+        {
+          "cpu_record_median_ms": 0.126708,
+          "cpu_record_p95_ms": 0.317792,
+          "extra_fence_waits": 0,
+          "extra_queue_submits": 0,
+          "framebuffer_creations": 0,
+          "frames": 300,
+          "gpu": "Apple M3",
+          "gpu_median_ms": 0.099709,
+          "gpu_p95_ms": 0.26125,
+          "height": 1964,
+          "rendered_pixels_per_frame": 293544,
+          "width": 3024
+        },
+        {
+          "cpu_record_median_ms": 0.046791,
+          "cpu_record_p95_ms": 0.258208,
+          "extra_fence_waits": 0,
+          "extra_queue_submits": 0,
+          "framebuffer_creations": 0,
+          "frames": 300,
+          "gpu": "Apple M3",
+          "gpu_median_ms": 0.084167,
+          "gpu_p95_ms": 0.259042,
+          "height": 1964,
+          "rendered_pixels_per_frame": 293544,
+          "width": 3024
+        },
+        {
+          "cpu_record_median_ms": 0.133167,
+          "cpu_record_p95_ms": 0.294042,
+          "extra_fence_waits": 0,
+          "extra_queue_submits": 0,
+          "framebuffer_creations": 0,
+          "frames": 300,
+          "gpu": "Apple M3",
+          "gpu_median_ms": 0.226292,
+          "gpu_p95_ms": 0.264042,
+          "height": 1964,
+          "rendered_pixels_per_frame": 293544,
+          "width": 3024
+        }
+      ],
+      "median_of_gpu_medians_ms": 0.099709
+    },
+    "pixel_comparison": {
+      "size": [
+        3024,
+        1964
+      ],
+      "identical": true,
+      "rgba_sha256": "937921bca450c4984b35216cd2886d211b4a53c1dfbc8f21e9f8d692bb94cbe0"
+    },
+    "method": "same gameplay HUD on an offscreen Apple M3 MoltenVK image, three alternating 300-frame runs per renderer, GPU timestamps; includes frame waits for measurement and excludes live Minecraft rendering, driver diversity and real FPS"
+  },
+  "hud_cpu_benchmark": {
+    "method": "1000 headless UI frames, old HUD with per-frame preference serialization versus complete new UI helper; no GPU or live game",
+    "output": [
+      "Legacy HUD with settings serialization CPU frame ms: 0.0123397",
+      "Gameplay HUD complete UI CPU frame ms: 0.00528496"
+    ]
+  },
+  "render_contracts": [
+    "commands recorded into Minecraft command buffer and queued in its existing submission",
+    "no forced encoder submission",
+    "one native render per engine submission",
+    "both targets require dynamic rendering and allow fewer than three engine submissions in flight",
+    "HUD state excludes full panel catalogs and observation JSON",
+    "unchanged snapshots bypass JNI JSON copy and parse",
+    "chunk load callbacks queue collection work instead of scanning synchronously",
+    "matching-loot geometry and returned buffer isolation verified"
+  ],
+  "source_commit": "7e79398dea61d3c3ce1a5572b608a1128c111d4f"
+}
