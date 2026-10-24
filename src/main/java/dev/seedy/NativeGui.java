@@ -14,6 +14,8 @@ public final class NativeGui {
     private static boolean rendererSeen;
     private static native String frame(String state, int width, int height, float density, double[] events, long[] graphics, double[] lines, boolean panel, boolean hud);
     private static native void dispose();
+    private static native void mapData(int channel, String data);
+    private static native void mapPosition(double x, double z, float yaw);
 
     public static void event(int kind, double a, double b, double c) {
         if (INPUT.size() < 1024) INPUT.add(new double[]{kind, a, b, c});
@@ -33,13 +35,14 @@ public final class NativeGui {
     private static final double[] NO_INPUT = new double[0];
     private static String sentSnapshot;
 
+
     public static boolean wantsFrame() {
         return !failed && (Minecraft.getInstance().gui.screen() instanceof OverlayScreen || hudVisible() || LoadedObjects.active() || loaded && !INPUT.isEmpty());
     }
 
     private static boolean hudVisible() {
         var client = Minecraft.getInstance();
-        return client.level != null && client.gui.screen() == null && !client.gui.hud.isHidden() && Workbench.INSTANCE.hudEnabled();
+        return client.level != null && client.gui.screen() == null && !client.gui.hud.isHidden() && Workbench.INSTANCE.overlaysEnabled();
     }
 
     public static void vulkanAvailable() { rendererSeen = true; }
@@ -64,6 +67,17 @@ public final class NativeGui {
                 while ((event = INPUT.poll()) != null) events.add(event);
                 packed = new double[events.size() * 4];
                 for (int i = 0; i < events.size(); i++) System.arraycopy(events.get(i), 0, packed, i * 4, 4);
+            }
+            for (int channel = panel ? 0 : 1; channel < 2; ++channel) for (int i = 0; i < 2; ++i) {
+                String data = Workbench.INSTANCE.mapSnapshot(channel);
+                if (data == null) break;
+                mapData(channel,data);
+            }
+            for (int i = 0; i < 4; ++i) { String data = Workbench.INSTANCE.terrainUpdate(); if (data == null) break; mapData(2,data); }
+            if (client.player != null) {
+                float partial = client.getDeltaTracker().getGameTimeDeltaPartialTick(true);
+                var position = client.player.getPosition(partial);
+                mapPosition(position.x(),position.z(),client.player.getYRot(partial));
             }
             String snapshot = panel ? Workbench.INSTANCE.snapshot() : Workbench.INSTANCE.hudSnapshot();
             String action = frame(snapshot == sentSnapshot ? null : snapshot, width, height, (float)width / Math.max(1, window.getScreenWidth()), packed, graphics, OutlineProjection.frame(width, height), panel, hudVisible());

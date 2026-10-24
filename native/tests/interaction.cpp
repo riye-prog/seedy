@@ -17,7 +17,49 @@ static void require(bool condition, const char *message) {
     if (!condition) throw std::runtime_error(message);
 }
 
+static void testMapCaching() {
+    MapAtlas::reset(); MapAtlas::begin(); MapAtlas::texture = 42; MapAtlas::writable = true;
+    auto raster = [](auto &pixels) { pixels.fill(IM_COL32(90,160,110,255)); };
+    for (int i = 0; i < MapAtlas::uploadLimit; ++i) require(MapAtlas::get(uint64_t(i + 1),raster).ready,"Atlas upload was lost");
+    require(!MapAtlas::get(1000,raster).ready,"Atlas exceeded its upload budget");
+    require(MapAtlas::uploads.front().pixels.front() == IM_COL32(90,160,110,255),"Atlas padding changed edge colors");
+    MapAtlas::begin(); MapAtlas::texture = 42;
+    require(MapAtlas::get(1,raster).ready && MapAtlas::uploads.empty(),"An unchanged tile was uploaded again");
+    require(!MapAtlas::get(1000,raster).ready,"A busy staging buffer was reused");
+    MapAtlas::writable = true;
+    for (int i = 1000; i < 5000; ++i) {
+        if (MapAtlas::uploads.size() == MapAtlas::uploadLimit) { MapAtlas::begin(); MapAtlas::writable = true; }
+        require(MapAtlas::get(uint64_t(i),raster).ready,"Atlas eviction stopped making progress");
+    }
+    require(MapAtlas::entries.size() <= MapAtlas::capacity,"Atlas cache grew without a limit");
+    Json packet = {{"id",1},{"seed","42"},{"dimension","overworld"},{"y",64},{"step",1},{"minX",-32},{"maxX",31},{"minZ",-32},{"maxZ",31},{"partial",true},{"revision",1},{"palette",Json::array({{{"name","minecraft:plains"},{"color",0x6fa554}}})},{"tiles",Json::array({{{"x",-1},{"z",-1},{"version",1},{"runs",{1024,0}}}})}};
+    MapView view;
+    mapDecode(view,packet);
+    auto key = view.tiles.front().atlasKey;
+    packet["tiles"][0]["x"] = 0; packet["tiles"][0]["version"] = 2;
+    mapDecode(view,packet);
+    require(view.tiles.size() == 2,"Partial map packets dropped previous tiles");
+    packet["tiles"][0]["x"] = -1; packet["tiles"][0]["version"] = 1;
+    mapDecode(view,packet);
+    require(view.tiles.size() == 2 && view.tiles.front().atlasKey == key,"Unchanged map tiles were decoded again");
+    packet["dimension"] = "the_end"; mapDecode(view,packet);
+    require(view.tiles.size() == 1,"Map retained tiles from another dimension");
+    receiveTerrain({{"reset",1},{"dimension","overworld"}});
+    receiveTerrain({{"epoch",1},{"dimension","overworld"},{"x",-1},{"z",-1},{"runs",{256,0x6fa554}}});
+    require(terrainTiles.size() == 1,"Loaded terrain packet was lost");
+    auto terrainKey = terrainTiles.begin()->second.key;
+    receiveTerrain({{"epoch",1},{"dimension","overworld"},{"x",-1},{"z",-1},{"runs",{256,0x6fa554}}});
+    require(terrainTiles.begin()->second.key == terrainKey,"Unchanged terrain invalidated its GPU tile");
+    receiveTerrain({{"reset",2},{"dimension","the_nether"}});
+    receiveTerrain({{"epoch",1},{"dimension","overworld"},{"x",0},{"z",0},{"runs",{256,0x6fa554}}});
+    require(terrainTiles.empty(),"A late terrain packet crossed a world boundary");
+    receiveTerrain({{"epoch",2},{"dimension","the_nether"},{"x",0},{"z",0},{"runs",{257,0x6fa554}}});
+    require(terrainTiles.empty(),"Malformed terrain data was accepted");
+    MapAtlas::reset();
+}
+
 static Json tick() {
+    MapAtlas::begin(); MapAtlas::texture = 42; MapAtlas::writable = true;
     ImGui::NewFrame();
     auto action = drawPanel(1440, 1000);
     ImGui::Render();
@@ -346,6 +388,7 @@ int main(int argc, char **argv) {
         require(preferenceValues()["hudEnabled"] == true && preferenceValues()["hudX"] == preferences.hudX,"Overlay preferences were not serialized");
         preferences.hudEnabled = false; hudFrame(false);
         require(ImGui::GetDrawData()->TotalVtxCount == 0,"Disabled gameplay overlay was still drawn");
+        testMapCaching();
         if (argc == 3) {
             Json preview; std::ifstream(argv[1]) >> preview;
             mapView = MapView{};

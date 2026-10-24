@@ -1,5 +1,6 @@
 #include "vulkan_renderer.h"
 #include "draw_region.h"
+#include "vulkan_atlas.h"
 #include <stdexcept>
 #include <string>
 #include <cstdint>
@@ -16,6 +17,7 @@ namespace VulkanRenderer {
     void shutdown() {
         if (!device) return;
         vkDeviceWaitIdle(device);
+        VulkanAtlas::shutdown();
         if (initialized) ImGui_ImplVulkan_Shutdown();
         initialized = false;
         device = VK_NULL_HANDLE;
@@ -25,7 +27,7 @@ namespace VulkanRenderer {
     void prepare(const jlong *handles) {
         auto incoming = reinterpret_cast<VkDevice>(handles[3]);
         auto incomingFormat = static_cast<VkFormat>(handles[8]);
-        if (initialized && device == incoming && format == incomingFormat) return;
+        if (initialized && device == incoming && format == incomingFormat) { VulkanAtlas::prepare(handles); return; }
         shutdown();
         volkInitializeCustom(reinterpret_cast<PFN_vkGetInstanceProcAddr>(handles[0]));
         auto instance = reinterpret_cast<VkInstance>(handles[1]);
@@ -52,6 +54,7 @@ namespace VulkanRenderer {
             info.CheckVkResultFn = check;
             if (!ImGui_ImplVulkan_Init(&info)) throw std::runtime_error("Could not initialize the Vulkan panel");
             initialized = true;
+            VulkanAtlas::prepare(handles);
         } catch (...) { shutdown(); throw; }
     }
 
@@ -60,6 +63,7 @@ namespace VulkanRenderer {
         if (area.width == 0 || area.height == 0) return;
         auto commands = reinterpret_cast<VkCommandBuffer>(handles[9]);
         if (!commands) throw std::runtime_error("Missing Minecraft command buffer");
+        VulkanAtlas::upload(commands,handles);
         VkMemoryBarrier before{VK_STRUCTURE_TYPE_MEMORY_BARRIER};
         before.srcAccessMask = VK_ACCESS_MEMORY_WRITE_BIT;
         before.dstAccessMask = VK_ACCESS_COLOR_ATTACHMENT_READ_BIT | VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT;

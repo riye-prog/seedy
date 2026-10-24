@@ -40,6 +40,11 @@ public final class Workbench implements AutoCloseable {
     private final ExecutorService searches = Executors.newSingleThreadExecutor(Thread.ofPlatform().daemon().factory());
     private final AtomicLong searchGeneration = new AtomicLong();
     private final SeedMap seedMap = new SeedMap();
+    private final SeedMap miniMap = seedMap.sibling();
+    private final TerrainMap terrainMap = new TerrainMap();
+    private String miniKey = "";
+    private long miniRequest;
+    private String miniWarning = "";
     private boolean mapVisible;
     private int hudRevision;
     private JsonObject trackedLocation;
@@ -103,8 +108,49 @@ public final class Workbench implements AutoCloseable {
         catch (java.io.IOException failure) { error = "Overlay settings could not be saved"; }
         publish(Minecraft.getInstance());
     }
+    public boolean minimapEnabled() { return connected && uiSettings.get("miniEnabled").getAsBoolean(); }
+    public boolean overlaysEnabled() { return hudEnabled() || minimapEnabled(); }
+    public String mapSnapshot(int channel) { return channel == 0 ? seedMap.poll() : miniMap.poll(); }
+    public String terrainUpdate() { return terrainMap.poll(); }
+    public void toggleMinimap() {
+        uiSettings.addProperty("miniEnabled",!uiSettings.get("miniEnabled").getAsBoolean());
+        hudRevision++;
+        try { if (uiStore != null) uiSettings = uiStore.save(uiSettings); }
+        catch (java.io.IOException failure) { error = "Minimap settings could not be saved"; }
+        publish(Minecraft.getInstance());
+    }
+    private void tickMinimap(Minecraft client) {
+        boolean enabled = minimapEnabled();
+        int mode = uiSettings.get("miniMode").getAsInt();
+        terrainMap.tick(client,enabled && mode != 2,uiSettings.get("miniZoom").getAsDouble(),uiSettings.get("miniSize").getAsInt(),recovering());
+        if (!enabled || mode == 1 || seed == null || !generationVersion.equals(gameVersion) || client.player == null || client.level == null) {
+            if (!miniKey.isEmpty()) { miniKey = ""; miniMap.reset(); }
+            miniWarning = seed != null && !generationVersion.equals(gameVersion) ? "Seed layer needs the world's generation version" : "";
+            return;
+        }
+        if (ticks % 10 != 0) return;
+        String dimension = client.level.dimension().identifier().getPath();
+        int radius = (int)Math.ceil(uiSettings.get("miniSize").getAsDouble() * uiSettings.get("miniZoom").getAsDouble() * 0.72) + 32;
+        int step = 1; while (step * 32 < radius / 6) step *= 2;
+        int span = step * 32, x = Math.floorDiv(client.player.getBlockX(),span) * span, z = Math.floorDiv(client.player.getBlockZ(),span) * span;
+        int extent = Math.ceilDiv(radius,span) * span;
+        int layer = uiSettings.get("miniTarget").getAsInt();
+        String[] targets = switch (dimension) {
+            case "the_nether" -> new String[]{"minecraft:fortress","minecraft:bastion_remnant","minecraft:ruined_portals","minecraft:nether_fossils"};
+            case "the_end" -> new String[]{"minecraft:end_cities","minecraft:end_cities","minecraft:end_cities","minecraft:end_cities"};
+            default -> new String[]{"minecraft:villages","minecraft:ancient_cities","minecraft:desert_pyramids","minecraft:strongholds"};
+        };
+        String target = uiSettings.get("miniStructures").getAsBoolean() ? targets[layer] : "";
+        Integer salt = null; miniWarning = "";
+        if (!target.isEmpty()) try { salt = checkedPlacementSalt(target); } catch (IllegalArgumentException conflict) { miniWarning = conflict.getMessage(); }
+        String key = seed + dimension + x + ":" + z + ":" + step + ":" + extent + target + salt + miniWarning;
+        if (key.equals(miniKey)) return;
+        miniKey = key;
+        miniMap.request(new SeedMap.Request(++miniRequest,Long.parseLong(seed),dimension,64,step,x - extent,z - extent,x + extent,z + extent,target,"any",salt,miniWarning.isEmpty(),miniWarning,false));
+    }
     public boolean structureRecoveryRunning() { return recovery.running(); }
     public boolean recovering() { return anyRecoveryRunning(); }
+    public boolean mapping() { return seedMap.running() || miniMap.running(); }
     public JsonObject recoveryContext() {
         var client = Minecraft.getInstance();
         var result = new JsonObject();
@@ -132,7 +178,7 @@ public final class Workbench implements AutoCloseable {
     public void session(Long seedHash) {
         saveSession();
         session++;
-        seedMap.reset();
+        seedMap.reset(); miniMap.reset(); miniKey = "";
         connected = seedHash != null;
         hash = seedHash;
         trackedLocation = null;
@@ -191,8 +237,9 @@ public final class Workbench implements AutoCloseable {
 
     public void tick(Minecraft client) {
         if (catalog == null) return;
+        tickMinimap(client);
         if (++ticks % 5 == 0) {
-            if (hudEnabled() || client.gui.screen() instanceof OverlayScreen) publish(client);
+            if (overlaysEnabled() || client.gui.screen() instanceof OverlayScreen) publish(client);
             else snapshotDirty = true;
         }
         if (ticks % 100 == 0) saveSession();
@@ -236,7 +283,7 @@ public final class Workbench implements AutoCloseable {
         recovery.start(selected, hash, value -> Minecraft.getInstance().execute(() -> {
             if (session != world || revision != evidenceRevision) return;
             seed = Long.toString(value);
-            seedMap.reset();
+            seedMap.reset(); miniMap.reset(); miniKey = "";
             verified = true;
             dirty = true;
             cancelSearch();
@@ -256,7 +303,7 @@ public final class Workbench implements AutoCloseable {
         seed = Long.toString(value);
         verified = true;
         dirty = true;
-        seedMap.reset();
+        seedMap.reset(); miniMap.reset(); miniKey = "";
         recovery.cancel();
         cancelSearch();
         publish(Minecraft.getInstance());
@@ -319,10 +366,10 @@ public final class Workbench implements AutoCloseable {
                     paperSalts.clear();
                     paperRecovery.cancel();
                     revision++;
-                    seedMap.reset();
+                    seedMap.reset(); miniMap.reset(); miniKey = "";
                     cancelSearch();
                 }
-                case "clearSeed" -> { trackedLocation = null; seed = null; verified = false; paperSalts.clear(); paperRecovery.cancel(); revision++; seedMap.reset(); cancelSearch(); }
+                case "clearSeed" -> { trackedLocation = null; seed = null; verified = false; paperSalts.clear(); paperRecovery.cancel(); revision++; seedMap.reset(); miniMap.reset(); miniKey = ""; cancelSearch(); }
                 case "map" -> {
                     if (seed == null) throw new IllegalArgumentException("Recover or enter a seed first.");
                     if (!generationVersion.equals(gameVersion)) throw new IllegalArgumentException("Use the matching 26.2 or 26.3 Seedy jar for the map in this world.");
@@ -438,7 +485,7 @@ public final class Workbench implements AutoCloseable {
             paperSalts.put(kind, salt);
             dirty = true;
             cancelSearch();
-            seedMap.reset();
+            seedMap.reset(); miniMap.reset(); miniKey = "";
         }));
     }
 
@@ -490,6 +537,7 @@ public final class Workbench implements AutoCloseable {
         var state = new JsonObject();
         state.addProperty("seed", seed == null ? "" : seed);
         state.add("uiSettings", uiSettings);
+        state.addProperty("minimapWarning",miniWarning);
         state.addProperty("hudRevision", hudRevision);
         state.addProperty("searchChecked", locationProgress.checked());
         state.addProperty("searchFound", locationProgress.found());
@@ -589,7 +637,7 @@ public final class Workbench implements AutoCloseable {
         state.addProperty("searchDimension", searchDimension);
         state.addProperty("searchCityFilter", searchCityFilter);
         state.add("catalogs", JSON.toJsonTree(dimensionCatalogs));
-        if (mapVisible) state.add("map", seedMap.snapshot());
+
         state.addProperty("error", error);
         state.addProperty("storageStatus", dirty && storageWritable ? "Unsaved changes" : storageStatus);
         state.addProperty("pendingChunks", SeedyClient.pendingChunks());
@@ -659,5 +707,5 @@ public final class Workbench implements AutoCloseable {
         panelSnapshotAt = System.nanoTime();
     }
 
-    @Override public void close() { saveSession(); recovery.close(); paperRecovery.close(); seedMap.close(); cancelSearch(); if (locator != null) searches.submit(locator::close); searches.shutdown(); }
+    @Override public void close() { saveSession(); recovery.close(); paperRecovery.close(); miniMap.close(); seedMap.close(); terrainMap.close(); cancelSearch(); if (locator != null) searches.submit(locator::close); searches.shutdown(); }
 }

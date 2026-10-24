@@ -35,13 +35,16 @@ public abstract class VulkanSurfaceMixin {
         var view = (VulkanGpuTextureView)texture;
         if (seedyGraphics == null) {
             var queue = device.graphicsQueue();
-            seedyGraphics = new long[]{VK.getFunctionProvider().getFunctionAddress("vkGetInstanceProcAddr"), device.instance().vkInstance().address(), device.vkDevice().getPhysicalDevice().address(), device.vkDevice().address(), queue.vkQueue().address(), queue.queueFamilyIndex(), 0, 0, 0, 0};
+            seedyGraphics = new long[]{VK.getFunctionProvider().getFunctionAddress("vkGetInstanceProcAddr"), device.instance().vkInstance().address(), device.vkDevice().getPhysicalDevice().address(), device.vkDevice().address(), queue.vkQueue().address(), queue.queueFamilyIndex(), 0, 0, 0, 0, 0, 0, 0};
         }
         var commands = vulkan.allocateAndBeginTransientCommandBuffer();
         seedyGraphics[6] = view.texture().vkImage();
         seedyGraphics[7] = view.vkImageView();
         seedyGraphics[8] = VulkanConst.toVk(view.texture().getFormat());
         seedyGraphics[9] = commands.address();
+        seedyGraphics[10] = submission;
+        seedyGraphics[11] = ((VulkanEncoderAccessor)encoder).seedyCompletedIndex();
+        seedyGraphics[12] = ((VulkanEncoderAccessor)encoder).seedySubmitSemaphore();
         NativeGui.render(seedyGraphics, view.getWidth(0), view.getHeight(0));
         int result = VK12.vkEndCommandBuffer(commands);
         if (result != VK12.VK_SUCCESS) throw new IllegalStateException("Could not finish Seedy commands: " + result);

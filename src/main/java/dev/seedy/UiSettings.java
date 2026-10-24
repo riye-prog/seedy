@@ -46,10 +46,15 @@ final class UiSettings {
         number(input,result,"hudAnchor",1,0,4);
         number(input,result,"hudX",0.02,0,1);
         number(input,result,"hudY",0.1,0,1);
+        number(input,result,"miniSize",224,128,360);
+        number(input,result,"miniZoom",1,0.5,8);
+        number(input,result,"miniMode",0,0,2);
+        number(input,result,"miniTarget",0,0,3);
+        number(input,result,"miniAnchor",0,0,3);
         number(input,result,"grid",1,0,2);
         number(input,result,"section",5,0,6);
-        for (String key : java.util.List.of("maximized","controls","biomeLabels","structureLabels","showPlayer","relief","coastlines","hudEnabled","hudCoordinates","hudBiome","hudDimension","hudFps","hudRecovery","hudEvidence","hudWaypoint","hudSeed","hudAutoTarget")) {
-            boolean fallback = !java.util.Set.of("maximized", "hudEnabled", "hudSeed", "hudEvidence").contains(key);
+        for (String key : java.util.List.of("maximized","controls","biomeLabels","structureLabels","showPlayer","relief","coastlines","hudEnabled","hudCoordinates","hudBiome","hudDimension","hudFps","hudRecovery","hudEvidence","hudWaypoint","hudSeed","hudAutoTarget","miniEnabled","miniRotate","miniStructures")) {
+            boolean fallback = !java.util.Set.of("maximized", "hudEnabled", "hudSeed", "hudEvidence", "miniRotate").contains(key);
             result.addProperty(key, input.has(key) && input.get(key).isJsonPrimitive() && input.get(key).getAsJsonPrimitive().isBoolean() ? input.get(key).getAsBoolean() : fallback);
         }
         return result;

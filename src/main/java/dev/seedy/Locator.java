@@ -96,11 +96,13 @@ public final class Locator implements AutoCloseable {
         return search(seed, kind, target, x, y, z, radius, query, dimension, cityFilter, 256, paperSalts, progress);
     }
 
+    private final Map<String, BiomeSampler> mapSamplers = new java.util.HashMap<>();
+
     BiomeSampler mapBiomes(long seed, String dimension) {
         validateDimension(dimension);
-        if (structureSeed == null || structureSeed != seed) { structureWorlds.clear(); structureSeed = seed; }
+        if (structureSeed == null || structureSeed != seed) { structureWorlds.clear(); mapSamplers.clear(); structureSeed = seed; }
         var world = structureWorlds.computeIfAbsent(dimension, key -> WorldgenAdapter.structureWorld(registries, seed, key));
-        return WorldgenAdapter.mapBiomes(world, seed);
+        return mapSamplers.computeIfAbsent(dimension,key -> WorldgenAdapter.mapBiomes(world, seed));
     }
 
     int mapHeight(long seed, int x, int z) {
@@ -124,7 +126,7 @@ public final class Locator implements AutoCloseable {
         validateDimension(dimension);
         if (!List.of("any", "with_elytra", "without_elytra").contains(cityFilter)) throw new IllegalArgumentException("Choose all cities, with elytra, or without elytra.");
         if (!cityFilter.equals("any") && (!kind.equals("structure") || !target.equals("minecraft:end_cities"))) throw new IllegalArgumentException("The elytra filter only applies to End cities.");
-        if (structureSeed == null || structureSeed != seed) { structureWorlds.clear(); structureSeed = seed; }
+        if (structureSeed == null || structureSeed != seed) { structureWorlds.clear(); mapSamplers.clear(); structureSeed = seed; }
         if (query.enabled() && (!kind.equals("structure") || !LootQuery.supports(target))) throw new IllegalArgumentException("Chest loot is supported for ancient cities and desert temples.");
         if (query.enabled() && query.requirements().stream().anyMatch(rule -> !LootCatalog.items().contains(rule.item()))) throw new IllegalArgumentException("Choose an item from the chest loot list.");
         if (radius < 128 || radius > MAX_RADIUS || Math.abs((long)x) > 29_990_000 || Math.abs((long)z) > 29_990_000 || y < -64 || y > 320) throw new IllegalArgumentException("Use a radius of 128–1048576 and coordinates inside world bounds.");
@@ -240,6 +242,6 @@ public final class Locator implements AutoCloseable {
     @Override public void close() { if (vanillaStructures != null) { vanillaStructures.close(); vanillaStructures = null; chestPredictor = null; } }
 
     private static void checkCancelled() {
-        if (Thread.currentThread().isInterrupted()) throw new CancellationException("Search cancelled.");
+        if (!dev.seedy.recovery.RecoveryWorkload.checkpoint(() -> false)) throw new CancellationException("Search cancelled.");
     }
 }

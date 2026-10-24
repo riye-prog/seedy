@@ -24,6 +24,17 @@ public final class McoptRenderProbe {
         return Linker.nativeLinker().downcallHandle(library.find(name).orElseThrow(),descriptor);
     }
 
+    private static int[] terrainPixels(int chunkX, int chunkZ) {
+        int[] colors = new int[256];
+        for (int i = 0; i < 256; ++i) colors[i] = ((chunkX * 16 + i % 16) / 8 + (chunkZ * 16 + i / 16) / 12) % 5 == 0 ? 0x376b43 : 0x75a85a;
+        return colors;
+    }
+
+    private static String terrainPacket(int x, int z) {
+        var data = TerrainMap.encode(x,z,terrainPixels(x,z),new int[256]);
+        data.addProperty("epoch",1); data.addProperty("dimension","overworld"); return data.toString();
+    }
+
     public static void main(String[] arguments) throws Throwable {
         var nativeType = Class.forName("mcopt.metal.Native");
         var lookup = nativeType.getDeclaredField("LIB");
@@ -60,16 +71,28 @@ public final class McoptRenderProbe {
             backgroundPixels.copyFrom(MemorySegment.ofArray(backdrop));
             var buffers = new long[3];
             for (int index = 0; index < buffers.length; index++) buffers[index] = (long)newBuffer.invokeExact(context,(long)BYTES);
-            var settings = Map.of("hudEnabled",true,"hudAnchor",0,"hudSeed",true);
+            var settings = Map.of("hudEnabled",true,"hudAnchor",1,"hudSeed",true,"miniEnabled",false);
             var state = Map.ofEntries(Map.entry("connected",true),Map.entry("seed","2589511696370800371"),Map.entry("verified",true),Map.entry("gameVersion","26.3"),Map.entry("generationVersion","26.3"),Map.entry("dimension","overworld"),Map.entry("biome","minecraft:cherry_grove"),Map.entry("x",128),Map.entry("y",72),Map.entry("z",96),Map.entry("fps",144),Map.entry("structures",new String[]{"minecraft:ancient_cities"}),Map.entry("recoveryTypes",new String[]{"minecraft:desert_pyramids"}),Map.entry("observations",new Object[0]),Map.entry("uiSettings",settings));
             String snapshot = new GsonBuilder().create().toJson(state);
             var inFlight = new ArrayDeque<Long>();
             var samples = new ArrayList<Long>();
             var countData = arena.allocate(JAVA_INT,4);
             var output = new ArrayList<Map<String,Object>>();
-            for (int pass = 0; pass < 3; pass++) {
+            for (int pass = 0; pass < (arguments.length > 2 ? 4 : 3); pass++) {
+                boolean minimap = pass == 3;
+                if (minimap) {
+                    var data = NativeGui.class.getDeclaredMethod("mapData",int.class,String.class); data.setAccessible(true);
+                    var position = NativeGui.class.getDeclaredMethod("mapPosition",double.class,double.class,float.class); position.setAccessible(true);
+                    data.invoke(null,1,Files.readString(Path.of(arguments[2])));
+                    data.invoke(null,2,"{\"reset\":1,\"dimension\":\"overworld\"}");
+                    for (int z = 5; z <= 8; ++z) for (int x = 7; x <= 10; ++x) data.invoke(null,2,terrainPacket(x,z));
+                    position.invoke(null,128.0,96.0,45f);
+                    var next = com.google.gson.JsonParser.parseString(snapshot).getAsJsonObject();
+                    next.addProperty("hudRevision",1); next.getAsJsonObject("uiSettings").addProperty("miniEnabled",true);
+                    snapshot = next.toString();
+                }
                 boolean panel = pass == 1;
-                boolean hud = pass == 0;
+                boolean hud = pass == 0 || minimap;
                 int frames = hud ? 120 : 8;
                 double[] lines = pass == 2 ? new double[]{400,300,700,300,2,700,300,700,500,2,700,500,400,500,2,400,500,400,300,2,900,300,1200,300,0} : new double[0];
                 for (int index = 0; index < frames; index++) {
@@ -78,7 +101,7 @@ public final class McoptRenderProbe {
                     long started = System.nanoTime();
                     Object action = frame.invoke(null,index == 0 ? snapshot : null,WIDTH,HEIGHT,1f,new double[0],McoptBridge.graphics(encoder,texture),lines,panel,hud);
                     if (hud && action != null) throw new IllegalStateException("Read-only HUD emitted an action: " + action);
-                    if (hud && index > 10) samples.add(System.nanoTime() - started);
+                    if (pass == 0 && index > 10) samples.add(System.nanoTime() - started);
                     counters.invokeExact(countData.address());
                     if (countData.get(JAVA_INT,0) != 1) throw new IllegalStateException("Overlay created another command buffer");
                     readback.invokeExact(encoder,texture,0,0,0,WIDTH,HEIGHT,buffers[index % buffers.length],0L,WIDTH * 4);
@@ -101,9 +124,9 @@ public final class McoptRenderProbe {
                     }
                     if (!colored) throw new IllegalStateException("Matching-loot outline color was not preserved");
                 }
-                var path = Path.of(arguments[1] + (panel ? "-panel" : hud ? "-hud" : "-outlines") + ".bgra");
+                var path = Path.of(arguments[1] + (minimap ? "-minimap" : panel ? "-panel" : hud ? "-hud" : "-outlines") + ".bgra");
                 Files.write(path,image);
-                output.add(Map.of("panel",panel,"hud",hud,"frames",frames,"changed_pixels",changed,"image",path.toString()));
+                output.add(Map.of("panel",panel,"hud",hud,"minimap",minimap,"frames",frames,"changed_pixels",changed,"image",path.toString()));
             }
             dispose.invoke(null);
             release.invokeExact(texture);

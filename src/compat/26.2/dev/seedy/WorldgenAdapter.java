@@ -45,7 +45,9 @@ final class WorldgenAdapter {
         var source = world.generator().getBiomeSource();
         var climate = world.placements().randomState().sampler();
         var manager = new net.minecraft.world.level.biome.BiomeManager((x, y, z) -> source.getNoiseBiome(x, y, z, climate), net.minecraft.world.level.biome.BiomeManager.obfuscateSeed(seed));
-        return (x, y, z) -> manager.getBiome(new net.minecraft.core.BlockPos(x, y, z)).unwrapKey().orElseThrow().identifier().toString();
+        var position = new net.minecraft.core.BlockPos.MutableBlockPos();
+        var names = new java.util.IdentityHashMap<net.minecraft.core.Holder<net.minecraft.world.level.biome.Biome>,String>();
+        return (x, y, z) -> names.computeIfAbsent(manager.getBiome(position.set(x,y,z)),holder -> holder.unwrapKey().orElseThrow().identifier().toString());
     }
 
     static net.minecraft.server.packs.resources.MultiPackResourceManager resources() {

@@ -605,8 +605,10 @@ static void savedPanel(Json &command) {
 }
 
 #include "ui_settings.h"
+#include "map_atlas.h"
 #include "seed_map.h"
 #include "gameplay_hud.h"
+#include "minimap.h"
 
 static void drawOutlines(const std::vector<double> &lines) {
     auto draw = ImGui::GetBackgroundDrawList();
@@ -753,6 +755,7 @@ static bool panelWasVisible = false;
 static Json drawOverlayFrame(int width, int height, bool panel, bool hud) {
     loadPreferences();
     Json command = panel ? drawPanel(width,height) : Json::object();
+    if (hud) drawMinimap(width,height);
     if (hud || panel && hudEditing) drawGameplayHud(width,height,panel && hudEditing);
     if (!panel && panelWasVisible && preferencesLoaded) persistPreferences(command,true);
     panelWasVisible = panel;
@@ -760,6 +763,17 @@ static Json drawOverlayFrame(int width, int height, bool panel, bool hud) {
 }
 
 #ifndef SEEDY_HEADLESS_TEST
+extern "C" JNIEXPORT void JNICALL Java_dev_seedy_NativeGui_mapData(JNIEnv *env, jclass, jint channel, jstring payload) {
+    try {
+        auto data = Json::parse(javaString(env,payload));
+        if (channel == 2) receiveTerrain(data);
+        else if (channel == 1 && data.value("id",-1LL) >= miniView.data.value("id",-1LL)) mapDecode(miniView,data);
+        else if (channel == 0 && data.value("id",-1LL) == mapView.requestId && data.value("seed","") == mapView.seed && data.value("y",64) == mapView.y) mapDecode(mapView,data);
+    } catch (const std::exception &error) { env->ThrowNew(env->FindClass("java/lang/IllegalStateException"),error.what()); }
+}
+extern "C" JNIEXPORT void JNICALL Java_dev_seedy_NativeGui_mapPosition(JNIEnv *, jclass, jdouble x, jdouble z, jfloat yaw) {
+    liveMapX = x; liveMapZ = z; liveMapYaw = yaw;
+}
 extern "C" JNIEXPORT jstring JNICALL Java_dev_seedy_NativeGui_frame(JNIEnv *env, jclass type, jstring snapshot, jint width, jint height, jfloat density, jdoubleArray events, jlongArray graphics, jdoubleArray outlineLines, jboolean panel, jboolean hud) {
     try {
         frameEnvironment = env;
@@ -787,9 +801,10 @@ extern "C" JNIEXPORT jstring JNICALL Java_dev_seedy_NativeGui_frame(JNIEnv *env,
             if (kind == 4) io.AddInputCharacter(static_cast<unsigned int>(input[i+1]));
             if (kind == 5) { io.AddFocusEvent(input[i+1] != 0); mapView.sentKey.clear(); }
         }
-        jlong handles[10]{};
+        MapAtlas::begin();
+        jlong handles[13]{};
         int handleCount = env->GetArrayLength(graphics);
-        if (handleCount != 10 && handleCount != 3) throw std::runtime_error("Invalid renderer context");
+        if (handleCount != 13 && handleCount != 10 && handleCount != 3) throw std::runtime_error("Invalid renderer context");
         env->GetLongArrayRegion(graphics, 0, handleCount, handles);
         if (handleCount == 3) {
 #ifdef __APPLE__

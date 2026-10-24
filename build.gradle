@@ -1,5 +1,5 @@
 plugins { id 'net.fabricmc.fabric-loom' version '1.17.21' }
-version = "0.9.22+${project.name}"
+version = "0.9.23+${project.name}"
 group = 'dev.seedy'
 base.archivesName = 'seedy'
 repositories { mavenCentral() }
@@ -39,6 +39,7 @@ tasks.register('mcoptRenderProbe', JavaExec) {
         if (!project.hasProperty('mcoptJar')) throw new GradleException('Pass -PmcoptJar=/absolute/path/to/mcopt.jar')
         classpath += files(project.property('mcoptJar'))
         args rootProject.file('native/dist/macos-universal/libseedy.dylib').absolutePath, project.findProperty('mcoptOutput') ?: '/tmp/seedy-mcopt-render'
+        if (project.hasProperty('mapFixture')) args project.property('mapFixture')
     }
 }
 tasks.register('mcoptLoaderProbe', JavaExec) {

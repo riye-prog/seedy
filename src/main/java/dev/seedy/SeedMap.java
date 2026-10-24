@@ -33,21 +33,38 @@ public final class SeedMap implements AutoCloseable {
     record TilePos(int x, int z) { }
     record BiomeKey(long seed, String dimension, int y, int step, TilePos position, boolean relief) { }
     record StructureKey(long seed, String dimension, String target, String cityFilter, Integer paperSalt, TilePos position) { }
-    record Tile(int x, int z, List<Integer> runs, List<Integer> heights) {
+    record Tile(int x, int z, List<Integer> runs, List<Integer> heights, long version) {
+        Tile(int x, int z, List<Integer> runs, List<Integer> heights) { this(x, z, runs, heights, TILE_VERSIONS.incrementAndGet()); }
         Tile(int x, int z, List<Integer> runs) { this(x, z, runs, List.of()); }
     }
     record HeightKey(long seed, int x, int z) { }
     private static final class SearchProgressHolder { boolean partial; }
     record Swatch(String name, int color) { }
     private static final Gson JSON = new Gson();
-    private final ExecutorService worker = Executors.newSingleThreadExecutor(task -> { var thread = new Thread(task, "Seedy map"); thread.setDaemon(true); thread.setPriority(Thread.MIN_PRIORITY); return thread; });
-    private final Map<BiomeKey, Tile> biomeCache = boundedCache(1024);
-    private final Map<StructureKey, List<Locator.Result>> structureCache = boundedCache(256);
-    private final Map<String, List<Swatch>> palettes = new LinkedHashMap<>();
-    private final Map<HeightKey, Integer> heightCache = boundedCache(16384);
-    private Locator locator;
+    private static final java.util.concurrent.atomic.AtomicLong TILE_VERSIONS = new java.util.concurrent.atomic.AtomicLong();
+    private static final class Shared {
+        final ExecutorService worker = Executors.newSingleThreadExecutor(dev.seedy.recovery.RecoveryWorkload.threads("Seedy map"));
+        final Map<BiomeKey, Tile> biomeCache = boundedCache(1024);
+        final Map<StructureKey, List<Locator.Result>> structureCache = boundedCache(256);
+        final Map<String, List<Swatch>> palettes = new LinkedHashMap<>();
+        final Map<HeightKey, Integer> heightCache = boundedCache(16384);
+        final Map<Long, com.google.gson.JsonElement> encodedTiles = boundedCache(2048);
+        Locator locator;
+    }
+    private final Shared shared;
+    private final boolean owner;
+    public SeedMap() { shared = new Shared(); owner = true; }
+    private SeedMap(Shared shared) { this.shared = shared; owner = false; }
+    public SeedMap sibling() { return new SeedMap(shared); }
+    private final java.util.concurrent.ArrayBlockingQueue<String> updates = new java.util.concurrent.ArrayBlockingQueue<>(256);
+    private final Map<TilePos,Long> publishedTiles = new java.util.HashMap<>();
+    private long publishedRequest = -1;
+    private int publishedMarkers = -1;
+    public String poll() { return updates.poll(); }
     private Future<?> pending;
     private long generation;
+    private volatile boolean generating;
+    public boolean running() { return generating; }
     private long revision;
     private volatile JsonObject snapshot = new JsonObject();
 
@@ -73,7 +90,7 @@ public final class SeedMap implements AutoCloseable {
         var runs = new ArrayList<Integer>();
         int previous = -1, count = 0;
         for (int z = 0; z < 32; z++) {
-            if (Thread.currentThread().isInterrupted()) throw new CancellationException();
+            if (!dev.seedy.recovery.RecoveryWorkload.checkpoint(() -> false)) throw new CancellationException();
             for (int x = 0; x < 32; x++) {
                 int value = indices.get(sampler.at((position.x() * 32 + x) * step + step / 2, y, (position.z() * 32 + z) * step + step / 2));
                 if (value != previous && count > 0) { runs.add(count); runs.add(previous); count = 0; }
@@ -88,7 +105,8 @@ public final class SeedMap implements AutoCloseable {
     public synchronized void request(Request request) {
         stop();
         long token = generation;
-        pending = worker.submit(() -> generate(request, token));
+        updates.clear();
+        pending = shared.worker.submit(() -> { generating = true; try { generate(request,token); } finally { generating = false; } });
     }
 
     public synchronized void stop() {
@@ -96,7 +114,7 @@ public final class SeedMap implements AutoCloseable {
         if (pending != null) pending.cancel(true);
     }
 
-    public synchronized void reset() { stop(); snapshot = new JsonObject(); }
+    public synchronized void reset() { stop(); snapshot = new JsonObject(); updates.clear(); }
     public JsonObject snapshot() { return snapshot; }
 
     private void generate(Request request, long token) {
@@ -104,9 +122,9 @@ public final class SeedMap implements AutoCloseable {
         var markers = new ArrayList<Locator.Result>();
         int remaining = 0;
         try {
-            if (locator == null) locator = new Locator();
-            var palette = palettes.computeIfAbsent(request.dimension(), dimension -> locator.catalog(dimension).biomes().stream().map(name -> new Swatch(name, color(name))).toList());
-            if (!request.target().isEmpty() && !locator.catalog(request.dimension()).structures().contains(request.target())) throw new IllegalArgumentException("Choose a structure in this dimension.");
+            if (shared.locator == null) shared.locator = new Locator();
+            var palette = shared.palettes.computeIfAbsent(request.dimension(), dimension -> shared.locator.catalog(dimension).biomes().stream().map(name -> new Swatch(name, color(name))).toList());
+            if (!request.target().isEmpty() && !shared.locator.catalog(request.dimension()).structures().contains(request.target())) throw new IllegalArgumentException("Choose a structure in this dimension.");
             if (!request.cityFilter().equals("any") && !request.target().equals("minecraft:end_cities")) throw new IllegalArgumentException("The ship filter applies to End cities.");
             var positions = tiles(request.minX(), request.minZ(), request.maxX(), request.maxZ(), request.step() * 32);
             var structurePositions = request.showStructures() && !request.overviewStructures() ? tiles(request.minX(), request.minZ(), request.maxX(), request.maxZ(), 1024) : List.<TilePos>of();
@@ -114,26 +132,26 @@ public final class SeedMap implements AutoCloseable {
             var missingStructures = new ArrayList<StructureKey>();
             for (var position : positions) {
                 var key = new BiomeKey(request.seed(), request.dimension(), request.y(), request.step(), position, request.relief());
-                var tile = biomeCache.get(key);
+                var tile = shared.biomeCache.get(key);
                 if (tile == null) missing.add(key); else completed.add(tile);
             }
             for (var position : structurePositions) {
                 var key = new StructureKey(request.seed(), request.dimension(), request.target(), request.cityFilter(), request.paperSalt(), position);
-                var found = structureCache.get(key);
+                var found = shared.structureCache.get(key);
                 if (found == null) missingStructures.add(key); else markers.addAll(found);
             }
             boolean shade = request.relief() && request.dimension().equals("overworld") && request.y() >= 48;
             int tileOffset = completed.size();
             remaining = missing.size() * (shade ? 2 : 1) + missingStructures.size() + (request.showStructures() && request.overviewStructures() ? 1 : 0);
             publish(request, token, palette, completed, markers, remaining, "");
-            var sampler = locator.mapBiomes(request.seed(), request.dimension());
+            var sampler = shared.locator.mapBiomes(request.seed(), request.dimension());
             long published = System.nanoTime();
             for (var key : missing) {
                 check(token);
                 var baseKey = new BiomeKey(request.seed(), request.dimension(), request.y(), request.step(), key.position(), false);
-                var tile = biomeCache.get(baseKey);
-                if (tile == null) { tile = sample(sampler, palette, key.position(), request.y(), request.step()); biomeCache.put(baseKey, tile); }
-                if (!shade) biomeCache.put(key, tile);
+                var tile = shared.biomeCache.get(baseKey);
+                if (tile == null) { tile = sample(sampler, palette, key.position(), request.y(), request.step()); shared.biomeCache.put(baseKey, tile); }
+                if (!shade) shared.biomeCache.put(key, tile);
                 completed.add(tile);
                 remaining--;
                 if (System.nanoTime() - published > 150_000_000 || remaining == 0) { publish(request, token, palette, completed, markers, remaining, ""); published = System.nanoTime(); }
@@ -141,8 +159,8 @@ public final class SeedMap implements AutoCloseable {
             publish(request, token, palette, completed, markers, remaining, "");
             for (var key : missingStructures) {
                 check(token);
-                var found = locator.mapStructures(request.seed(), request.target(), key.position().x(), key.position().z(), request.dimension(), request.cityFilter(), request.paperSalt());
-                structureCache.put(key, found);
+                var found = shared.locator.mapStructures(request.seed(), request.target(), key.position().x(), key.position().z(), request.dimension(), request.cityFilter(), request.paperSalt());
+                shared.structureCache.put(key, found);
                 markers.addAll(found);
                 publish(request, token, palette, completed, markers, --remaining, "");
             }
@@ -154,7 +172,7 @@ public final class SeedMap implements AutoCloseable {
                 int radius = Math.clamp((int)Math.ceil(Math.hypot(request.maxX() - centerX, request.maxZ() - centerZ)), 128, Locator.MAX_RADIUS);
                 String saltTarget = request.target().equals("minecraft:fortress") || request.target().equals("minecraft:bastion_remnant") ? "minecraft:nether_complexes" : request.target();
                 SearchProgressHolder progress = new SearchProgressHolder();
-                var found = locator.search(request.seed(), "structure", request.target(), centerX, request.y(), centerZ, radius, LootQuery.NONE, request.dimension(), request.cityFilter(), request.paperSalt() == null ? Map.of() : Map.of(saltTarget, request.paperSalt()), value -> progress.partial = value.partial());
+                var found = shared.locator.search(request.seed(), "structure", request.target(), centerX, request.y(), centerZ, radius, LootQuery.NONE, request.dimension(), request.cityFilter(), request.paperSalt() == null ? Map.of() : Map.of(saltTarget, request.paperSalt()), value -> progress.partial = value.partial());
                 markers.addAll(found.stream().filter(result -> result.x() >= request.minX() && result.x() <= request.maxX() && result.z() >= request.minZ() && result.z() <= request.maxZ()).toList());
                 structureWarning = progress.partial ? "Structure scan reached its work limit. Zoom in to continue." : "";
                 publish(request, token, palette, completed, markers, --remaining, structureWarning);
@@ -166,23 +184,26 @@ public final class SeedMap implements AutoCloseable {
                     check(token);
                     int x = (key.position().x() * 32 + col * 8) * request.step();
                     int z = (key.position().z() * 32 + row * 8) * request.step();
-                    heights.add(heightCache.computeIfAbsent(new HeightKey(request.seed(), x, z), ignored -> locator.mapHeight(request.seed(), x, z)));
+                    heights.add(shared.heightCache.computeIfAbsent(new HeightKey(request.seed(), x, z), ignored -> shared.locator.mapHeight(request.seed(), x, z)));
                 }
                 var tile = completed.get(tileOffset + index);
                 tile = new Tile(tile.x(), tile.z(), tile.runs(), List.copyOf(heights));
-                completed.set(tileOffset + index, tile); biomeCache.put(key, tile); remaining--;
+                completed.set(tileOffset + index, tile); shared.biomeCache.put(key, tile); remaining--;
                 if (System.nanoTime() - published > 150_000_000 || remaining == 0) { publish(request, token, palette, completed, markers, remaining, structureWarning); published = System.nanoTime(); }
             }
 
         } catch (CancellationException ignored) {
         } catch (Throwable error) {
             org.slf4j.LoggerFactory.getLogger("Seedy").error("Seed map generation failed", error);
-            publish(request, token, palettes.getOrDefault(request.dimension(), List.of()), completed, markers, 0, error.getMessage() == null ? "Map generation failed." : error.getMessage());
+            publish(request, token, shared.palettes.getOrDefault(request.dimension(), List.of()), completed, markers, 0, error.getMessage() == null ? "Map generation failed." : error.getMessage());
             if (error instanceof VirtualMachineError fatal) throw fatal;
         }
     }
 
-    private synchronized void check(long token) { if (token != generation || Thread.currentThread().isInterrupted()) throw new CancellationException(); }
+    private void check(long token) {
+        synchronized (this) { if (token != generation || Thread.currentThread().isInterrupted()) throw new CancellationException(); }
+        if (!dev.seedy.recovery.RecoveryWorkload.checkpoint(() -> false)) throw new CancellationException();
+    }
 
     private void publish(Request request, long token, List<Swatch> palette, List<Tile> tiles, List<Locator.Result> markers, int remaining, String error) {
         synchronized (this) { if (token != generation || Thread.currentThread().isInterrupted()) return; }
@@ -193,13 +214,42 @@ public final class SeedMap implements AutoCloseable {
         next.addProperty("overviewStructures", request.overviewStructures());
         next.addProperty("error", error);
         next.add("palette", JSON.toJsonTree(palette));
-        next.add("tiles", JSON.toJsonTree(tiles));
+        var tileJson = new com.google.gson.JsonArray();
+        for (var tile : tiles) tileJson.add(shared.encodedTiles.computeIfAbsent(tile.version(),ignored -> JSON.toJsonTree(tile)));
+        next.add("tiles", tileJson);
         next.add("markers", JSON.toJsonTree(markers));
         synchronized (this) {
             if (token != generation || Thread.currentThread().isInterrupted()) return;
             next.addProperty("revision", ++revision);
             snapshot = next;
         }
+        publishTiles(request,token,next,tiles,markers.size());
+    }
+
+    private void publishTiles(Request request, long token, JsonObject snapshot, List<Tile> tiles, int markerCount) {
+        if (publishedRequest != request.id()) { publishedRequest = request.id(); publishedTiles.clear(); publishedMarkers = -1; }
+        var base = JSON.toJsonTree(request).getAsJsonObject();
+        base.addProperty("seed",Long.toString(request.seed()));
+        base.addProperty("revision",snapshot.get("revision").getAsLong());
+        base.addProperty("partial",true);
+        for (String field : List.of("palette","remaining","structuresVisible","overviewStructures","error")) base.add(field,snapshot.get(field));
+        var batch = new com.google.gson.JsonArray();
+        boolean sent = false;
+        for (var tile : tiles) {
+            var position = new TilePos(tile.x(),tile.z());
+            if (publishedTiles.getOrDefault(position,0L) == tile.version()) continue;
+            batch.add(shared.encodedTiles.get(tile.version())); publishedTiles.put(position,tile.version());
+            if (batch.size() == 4) { base.add("tiles",batch); enqueue(base.toString(),token); batch = new com.google.gson.JsonArray(); sent = true; }
+        }
+        if (!batch.isEmpty()) { base.add("tiles",batch); enqueue(base.toString(),token); sent = true; }
+        if (!sent || publishedMarkers != markerCount) {
+            base.remove("tiles"); base.add("markers",snapshot.get("markers")); enqueue(base.toString(),token); publishedMarkers = markerCount;
+        }
+    }
+
+    private void enqueue(String update, long token) {
+        check(token);
+        try { updates.put(update); } catch (InterruptedException cancelled) { Thread.currentThread().interrupt(); throw new CancellationException(); }
     }
 
     static int color(String biome) {
@@ -274,5 +324,5 @@ public final class SeedMap implements AutoCloseable {
         };
     }
 
-    @Override public synchronized void close() { stop(); worker.submit(() -> { if (locator != null) locator.close(); biomeCache.clear(); structureCache.clear(); heightCache.clear(); }); worker.shutdown(); }
+    @Override public synchronized void close() { stop(); if (!owner) return; shared.worker.submit(() -> { if (shared.locator != null) shared.locator.close(); shared.biomeCache.clear(); shared.structureCache.clear(); shared.heightCache.clear(); }); shared.worker.shutdown(); }
 }

@@ -167,9 +167,27 @@ class SeedMapTest {
         });
     }
 
+    @Test void minimapReusesTilesWithoutCancellingTheMainMap() throws InterruptedException {
+        try (var map = new SeedMap(); var mini = map.sibling()) {
+            map.request(new SeedMap.Request(501,42,"overworld",64,4,-128,-128,-1,-1,"","any"));
+            var first = await(map,501);
+            mini.request(new SeedMap.Request(502,42,"overworld",64,4,-128,-128,-1,-1,"","any"));
+            var second = await(mini,502);
+            assertEquals(first.get("tiles"),second.get("tiles"));
+            mini.reset();
+            assertEquals(first,map.snapshot());
+            assertNull(mini.poll());
+        }
+    }
+
     private static JsonObject await(SeedMap map, long id) throws InterruptedException {
         long deadline = System.nanoTime() + 60_000_000_000L;
         while (System.nanoTime() < deadline) {
+            String packet;
+            while ((packet = map.poll()) != null) {
+                var decoded = com.google.gson.JsonParser.parseString(packet).getAsJsonObject();
+                if (decoded.has("tiles")) assertTrue(decoded.getAsJsonArray("tiles").size() <= 4);
+            }
             var snapshot = map.snapshot();
             if (snapshot.has("id") && snapshot.get("id").getAsLong() == id && snapshot.get("remaining").getAsInt() == 0) {
                 assertEquals("",snapshot.get("error").getAsString());

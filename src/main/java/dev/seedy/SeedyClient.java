@@ -18,7 +18,7 @@ import static net.fabricmc.fabric.api.client.command.v2.ClientCommands.literal;
 public final class SeedyClient implements ClientModInitializer {
     private static final ObservationCollector COLLECTOR = new ObservationCollector();
     private static Long sessionHash;
-    private static KeyMapping toggle, hudToggle;
+    private static KeyMapping toggle, hudToggle, miniToggle;
     private static int smokeTicks;
     private static boolean smokeOpened;
     public static boolean matchesToggle(KeyEvent event) { return toggle != null && toggle.matches(event); }
@@ -26,17 +26,19 @@ public final class SeedyClient implements ClientModInitializer {
     public static boolean matchesHudToggle(KeyEvent event) { return hudToggle != null && hudToggle.matches(event); }
     public static void rescan() { COLLECTOR.rescan(); BedrockRecovery.INSTANCE.rescan(); }
     public static int pendingChunks() { return COLLECTOR.pending(); }
-    record Controls(KeyMapping panel, KeyMapping overlay) { }
+    record Controls(KeyMapping panel, KeyMapping overlay, KeyMapping minimap) { }
     static Controls createControls() {
         var category = KeyMapping.Category.register(Identifier.fromNamespaceAndPath("seedy", "controls"));
         return new Controls(
             new KeyMapping("key.seedy.toggle", InputConstants.KEY_F8, category),
-            new KeyMapping("key.seedy.hud", InputConstants.KEY_F9, category));
+            new KeyMapping("key.seedy.hud", InputConstants.KEY_F9, category),
+            new KeyMapping("key.seedy.minimap",InputConstants.KEY_F10,category));
     }
     @Override public void onInitializeClient() {
         var controls = createControls();
         toggle = KeyMappingHelper.registerKeyMapping(controls.panel());
         hudToggle = KeyMappingHelper.registerKeyMapping(controls.overlay());
+        miniToggle = KeyMappingHelper.registerKeyMapping(controls.minimap());
         ClientCommandRegistrationCallback.EVENT.register((dispatcher, registry) -> dispatcher.register(literal("seedy").executes(context -> {
             Minecraft.getInstance().execute(() -> Minecraft.getInstance().gui.setScreen(new OverlayScreen()));
             return 1;
@@ -65,13 +67,14 @@ public final class SeedyClient implements ClientModInitializer {
                 else if (client.gui.screen() == null && client.level != null) client.gui.setScreen(new OverlayScreen());
             }
             while (hudToggle.consumeClick()) if (client.level != null) Workbench.INSTANCE.toggleHud();
+            while (miniToggle.consumeClick()) if (client.level != null) Workbench.INSTANCE.toggleMinimap();
             if (client.level != null && !Workbench.INSTANCE.recovering()) COLLECTOR.tick(client.level, Workbench.INSTANCE);
             Workbench.INSTANCE.tick(client);
             BedrockRecovery.INSTANCE.tick(client);
             NetherBedrockRecovery.INSTANCE.tick(client);
             int frameLimit = client.getFramerateLimitTracker().getFramerateLimit();
             dev.seedy.recovery.RecoveryWorkload.frameLimit(frameLimit >= net.minecraft.client.Options.UNLIMITED_FRAMERATE_CUTOFF ? 0 : frameLimit);
-            dev.seedy.recovery.RecoveryWorkload.active(Workbench.INSTANCE.recovering());
+            dev.seedy.recovery.RecoveryWorkload.active(Workbench.INSTANCE.recovering() || Workbench.INSTANCE.mapping());
             BedrockRecovery.updateWorkBudget();
             NetherBedrockRecovery.updateWorkBudget();
         });

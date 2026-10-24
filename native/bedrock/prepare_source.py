@@ -90,6 +90,9 @@ if "--reference" not in sys.argv[3:]:
     positions = {match[1]: index for index, match in enumerate(assignments)}
     if len(assignments) != 640 or len(positions) != 640:
         raise SystemExit("unexpected inverse circuit assignments")
+    dependencies = {index: sorted({positions[name] for name in re.findall(r"S[12]_(?:lo|hi|ca|is|cb)\[\d+\]", match[2]) if name in positions}) for index, match in enumerate(assignments)}
+    if any(dependency >= index for index, values in dependencies.items() for dependency in values):
+        raise SystemExit("inverse circuit dependencies are not ordered")
     checks = []
     for match in assignments:
         carry = re.fullmatch(r"(S[12])_c([ab])\[(\d+)\]", match[1])
@@ -101,23 +104,38 @@ if "--reference" not in sys.argv[3:]:
         second = f"{state}_hi[{bit}]" if addition == "a" else f"{state}_lo[{bit}]"
         previous = f"{state}_c{addition}[{bit - 1}]" if bit else "0"
         expected = f"({first} & {second}) | ({first} & {previous}) | ({second} & {previous})"
-        dependencies = re.findall(r"S[12]_(?:lo|hi|ca|is|cb)\[\d+\]", match[1] + expected)
-        ready = max(positions[name] for name in dependencies)
-        checks.append((ready, match[1], expected))
+        required = {positions[name] for name in re.findall(r"S[12]_(?:lo|hi|ca|is|cb)\[\d+\]", match[1] + expected)}
+        pending = list(required)
+        while pending:
+            for dependency in dependencies[pending.pop()]:
+                if dependency not in required:
+                    required.add(dependency)
+                    pending.append(dependency)
+        checks.append((match[1], expected, required))
     if len(checks) != 40:
         raise SystemExit("unexpected inverse circuit carry constraints")
-    insertions = {}
-    for number, (ready, carry, expected) in enumerate(sorted(checks), 1):
-        check = f"\n\tsurviving &= ~(({carry}) ^ ({expected}));"
+    emitted = set()
+    lines = ["\n\tsimd surviving = ~uint64_t{};"]
+
+    def emit(index):
+        if index in emitted:
+            return
+        for dependency in dependencies[index]:
+            emit(dependency)
+        emitted.add(index)
+        lines.append("\t" + assignments[index][1] + " = " + assignments[index][2] + ";")
+
+    for number in range(1, len(checks) + 1):
+        carry, expected, required = min(checks, key=lambda check: (len(check[2] - emitted), positions[check[0]]))
+        checks.remove((carry, expected, required))
+        for index in sorted(required):
+            emit(index)
+        lines.append(f"\tsurviving &= ~(({carry}) ^ ({expected}));")
         if number >= 8 and number % 4 == 0:
-            check += "\n\tif (stdx::reduce(surviving, std::bit_or<>{}) == 0) return false;"
-        insertions.setdefault(ready, []).append(check)
-    for index in reversed(range(len(assignments))):
-        if index in insertions:
-            position = assignments[index].end()
-            source = source[:position] + "".join(insertions[index]) + source[position:]
-    position = assignments[0].start()
-    source = source[:position] + "\n\tsimd surviving = ~uint64_t{};\n" + source[position:]
+            lines.append("\tif (stdx::reduce(surviving, std::bit_or<>{}) == 0) return false;")
+    for index in range(len(assignments)):
+        emit(index)
+    source = source[:assignments[0].start()] + "\n".join(lines) + source[assignments[-1].end():]
 
 output.parent.mkdir(parents=True, exist_ok=True)
 if not output.exists() or output.read_text() != source:

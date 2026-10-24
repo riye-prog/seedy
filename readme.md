@@ -26,6 +26,12 @@ the panel, f9 hud, and matching-loot chest outlines render after mcopt applies p
 
 the command-line compatibility checks use the released mcopt jar: a loader probe applies the real fabric mixins and stops before minecraft's main method, while a render probe runs seedy's jni renderer on mcopt's actual native command buffers and reads back the hud and panel. these checks do not measure live gameplay fps or replace an in-game compatibility test. run the `mcoptLoaderProbe` and `mcoptRenderProbe` gradle tasks on 26.3 with `-PmcoptJar=/absolute/path/to/mcopt.jar` to repeat them.
 
+## minimap
+
+press f10 to toggle the minimap independently of the f9 information overlay. settings → minimap offers loaded terrain, seed biomes, or both together, with corner anchoring, size, zoom, rotation, and a structure layer. labels use normal capitalization. loaded terrain works before recovery; the combined view fills areas you have not loaded with seed-predicted biomes after a seed is available. markers use the selected dimension and the same checked paper placement settings as the full map. a mismatched generation version disables the seed layer. nether terrain follows a height slice near the player instead of showing the bedrock roof from below.
+
+terrain sampling reads only client-loaded chunks on the game thread, in small batches with a time and column budget. immutable snapshots are encoded on a background worker; pending jobs, updates, and the terrain cache have fixed limits. changes are refreshed periodically. both maps share biome, structure, and height caches on one background worker. map updates travel in packets of at most four tiles. a padded gpu atlas draws one quad per visible tile and uploads only changed tiles, with a fixed per-frame upload budget. vulkan uses minecraft's submission-completion indices to protect staging buffers; metal uses command-buffer completion callbacks. uploads use the existing frame command buffer, without an extra submission or gpu wait.
+
 ## seed map
 
 the interface uses a charcoal palette with black accents, a subtle background grid, map-first navigation, and grouped controls. village markers use house symbols; end cities with elytra ships use wing symbols. selected structures get a visible ring, and the location panel lets you copy coordinates or center the map. biome labels stay distinct from structure labels.
@@ -46,7 +52,7 @@ visible tiles load on one low-priority background worker, with a short delay aft
 
 press f9 to toggle the gameplay overlay. its key can be changed in minecraft controls. settings → gameplay overlay controls scale, opacity, corner anchoring, and which rows appear: coordinates, facing, biome, dimension, frame rate, recovery progress, collected evidence, a tracked location, and the seed value. the seed value is hidden by default. use edit overlay position in settings to drag it somewhere else. labels on the overlay use normal capitalization.
 
-use track on a search result or map selection to show its distance and direction while playing. nearest-result tracking can be enabled too. the overlay does not take mouse or keyboard input during gameplay, follows minecraft's hide-hud setting, and uses the existing vulkan renderer. closing the panel cancels map generation; keeping the small overlay visible does not keep the map worker running.
+use track on a search result or map selection to show its distance and direction while playing. nearest-result tracking can be enabled too. the overlay does not take mouse or keyboard input during gameplay, follows minecraft's hide-hud setting, and uses the existing vulkan renderer. closing the panel cancels its large map request. the minimap requests only its nearby viewport while enabled; the f9 information overlay alone does not keep map generation running.
 
 ## end cities
 
@@ -120,3 +126,5 @@ the 0.9.20 recovery probe compares the old and new native libraries with the sam
 the 0.9.21 policy recovered that same sample in 306.6 seconds. a full replay with the 0.9.19 native engine took 426.7 seconds. the foreground loop's 95th-percentile delay was 1.70 ms with the new policy and 12.75 ms with the old engine. other minecraft instances were being played during the comparison, so changing desktop load makes these approximate observations rather than a controlled speed guarantee. the probe now warms up at the same 120 fps limit used during measurement. frame-budget tests check full frame intervals, stable pacing with changing render duration, and low frame limits.
 
 0.9.22 carries the same runtime code as 0.9.21 and fixes a cancellation test that assumed several short sleeps would fit within one time slice. the test now also works when windows rounds a short sleep up to its timer interval.
+
+0.9.23 adds the minimap and tile-atlas renderer. the overworld inverse kernel schedules necessary carry checks by prerequisite work, rejecting impossible candidates earlier while preserving the existing worker ceiling, background priority, adaptive frame budget, and hash verification.

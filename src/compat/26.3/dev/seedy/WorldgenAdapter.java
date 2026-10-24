@@ -48,7 +48,9 @@ final class WorldgenAdapter {
     static Locator.BiomeSampler mapBiomes(Locator.StructureWorld world, long seed) {
         var resolver = world.generator().getBiomeSource().createResolver(world.placements().randomState().createClimateSampler(SamplerContext.EMPTY_UNCACHED));
         var manager = new net.minecraft.world.level.biome.BiomeManager(resolver, net.minecraft.world.level.biome.BiomeManager.obfuscateSeed(seed));
-        return (x, y, z) -> manager.getBiome(new net.minecraft.core.BlockPos(x, y, z)).unwrapKey().orElseThrow().identifier().toString();
+        var position = new net.minecraft.core.BlockPos.MutableBlockPos();
+        var names = new java.util.IdentityHashMap<net.minecraft.core.Holder<net.minecraft.world.level.biome.Biome>,String>();
+        return (x, y, z) -> names.computeIfAbsent(manager.getBiome(position.set(x,y,z)),holder -> holder.unwrapKey().orElseThrow().identifier().toString());
     }
 
     static net.minecraft.server.packs.resources.MultiPackResourceManager resources() {

@@ -1,16 +1,12 @@
 #include <array>
 
-struct MapSpan {
-    unsigned short start, count;
-    int biome;
-    unsigned char shade;
-};
-
 struct MapTile {
     int x, z;
-    std::array<int, 1024> cells;
-    std::array<unsigned char, 1024> shade;
-    std::vector<MapSpan> flat, relief;
+    uint64_t atlasKey = (++MapAtlas::sequence << 1) | 1;
+    long long version = 0;
+    std::vector<int> counts, anchors;
+    std::vector<int> cells = std::vector<int>(1024);
+    std::vector<unsigned char> shade = std::vector<unsigned char>(1024,128);
 };
 
 struct MapView {
@@ -31,6 +27,9 @@ struct MapView {
 };
 
 static MapView mapView;
+static std::array<Json,3> mapChannels = {Json::object(),Json::object(),Json::object()};
+static double liveMapX = 0, liveMapZ = 0;
+static float liveMapYaw = 0;
 
 static void mapZoom(double factor, ImVec2 anchor, ImVec2 center) {
     double before = mapView.blocksPerPixel;
@@ -39,22 +38,33 @@ static void mapZoom(double factor, ImVec2 anchor, ImVec2 center) {
     mapView.z += (anchor.y - center.y) * (before - mapView.blocksPerPixel);
 }
 
-static void mapReceive(const std::string &dimension) {
-    if (!state.contains("map")) return;
-    const auto &incoming = state["map"];
-    if (incoming.value("revision", -1LL) == mapView.revision || incoming.value("id", -1LL) != mapView.requestId || incoming.value("seed", "") != mapView.seed || incoming.value("dimension", "") != dimension || incoming.value("y", 64) != mapView.y) return;
+static void mapDecode(MapView &mapView, const Json &incoming) {
     mapView.revision = incoming.value("revision", -1LL);
-    mapView.data = incoming;
-    mapView.tiles.clear(); mapView.colors.clear(); mapView.names.clear(); mapView.water.clear();
-    for (const auto &swatch : incoming.value("palette", Json::array())) {
-        int rgb = swatch.value("color", 0);
-        mapView.colors.push_back(IM_COL32((rgb >> 16) & 255, (rgb >> 8) & 255, rgb & 255, 255));
-        mapView.names.push_back(label(swatch.value("name", "")));
-        auto name = swatch.value("name",""); mapView.water.push_back(name.find("ocean") != std::string::npos || name.find("river") != std::string::npos);
+    auto previousTiles = std::move(mapView.tiles);
+    bool partial = incoming.value("partial",false);
+    bool sameWorld = mapView.data.value("seed","") == incoming.value("seed","") && mapView.data.value("dimension","") == incoming.value("dimension","") && mapView.data.value("y",64) == incoming.value("y",64) && mapView.data.value("step",1) == incoming.value("step",1);
+    bool compatible = sameWorld && mapView.data.value("palette",Json::array()) == incoming.value("palette",Json::array());
+    if (!compatible) previousTiles.clear();
+    mapView.tiles.clear();
+    if (!compatible) {
+        mapView.colors.clear(); mapView.names.clear(); mapView.water.clear();
+        for (const auto &swatch : incoming.value("palette", Json::array())) {
+            int rgb = swatch.value("color", 0);
+            mapView.colors.push_back(IM_COL32((rgb >> 16) & 255, (rgb >> 8) & 255, rgb & 255, 255));
+            mapView.names.push_back(label(swatch.value("name", "")));
+            auto name = swatch.value("name",""); mapView.water.push_back(name.find("ocean") != std::string::npos || name.find("river") != std::string::npos);
+        }
     }
     for (const auto &tile : incoming.value("tiles", Json::array())) {
-        MapTile decoded{tile.value("x", 0), tile.value("z", 0), {}, {}};
-        decoded.shade.fill(128);
+        int x = tile.value("x",0), z = tile.value("z",0);
+        long long version = tile.value("version",0LL);
+        auto previous = std::find_if(previousTiles.begin(),previousTiles.end(),[&](const MapTile &entry) { return compatible && version && entry.x == x && entry.z == z && entry.version == version; });
+        if (previous != previousTiles.end()) { mapView.tiles.push_back(std::move(*previous)); previous->version = -1; continue; }
+        for (auto &entry : previousTiles) if (entry.x == x && entry.z == z) entry.version = -1;
+        MapTile decoded{};
+        decoded.x = x; decoded.z = z; decoded.version = version;
+        if (version > 0) decoded.atlasKey = (uint64_t(version) << 1) | 1;
+        decoded.counts.assign(mapView.colors.size(),0); decoded.anchors.assign(mapView.colors.size(),-1);
         auto heights = tile.value("heights",std::vector<int>{});
         if (heights.size() == 49) {
             std::array<ImVec2,25> gradients;
@@ -82,15 +92,38 @@ static void mapReceive(const std::string &dimension) {
             offset += count;
         }
         if (offset == 1024) {
-            for (int mode = 0; mode < 2; mode++) for (int row = 0; row < 32; row++) for (int col = 0; col < 32;) {
-                int first = row * 32 + col, last = col + 1;
-                while (last < 32 && decoded.cells[row * 32 + last] == decoded.cells[first] && (!mode || decoded.shade[row * 32 + last] == decoded.shade[first])) last++;
-                (mode ? decoded.relief : decoded.flat).push_back({static_cast<unsigned short>(first),static_cast<unsigned short>(last - col),decoded.cells[first],decoded.shade[first]});
-                col = last;
-            }
+            for (int index = 0; index < 1024; ++index) { int value = decoded.cells[index]; decoded.counts[value]++; if (decoded.anchors[value] < 0) decoded.anchors[value] = index; }
             mapView.tiles.push_back(std::move(decoded));
         }
     }
+    if (partial && compatible) for (auto &tile : previousTiles) {
+        int span = incoming.value("step",1) * 32;
+        if (tile.version < 0 || tile.x * span > incoming.value("maxX",0) || tile.z * span > incoming.value("maxZ",0) || (tile.x + 1) * span <= incoming.value("minX",0) || (tile.z + 1) * span <= incoming.value("minZ",0)) continue;
+        mapView.tiles.push_back(std::move(tile));
+    }
+    Json markers = sameWorld && mapView.data.value("id",-1LL) == incoming.value("id",-2LL) ? mapView.data.value("markers",Json::array()) : Json::array();
+    mapView.data = incoming;
+    mapView.data.erase("tiles");
+    if (!incoming.contains("markers")) mapView.data["markers"] = std::move(markers);
+}
+
+static void mapReceive(const std::string &dimension) {
+    if (mapChannels[0].empty() && !state.contains("map")) return;
+    const auto &incoming = mapChannels[0].empty() ? state["map"] : mapChannels[0];
+    if (incoming.value("revision",-1LL) == mapView.revision || incoming.value("id",-1LL) != mapView.requestId || incoming.value("seed","") != mapView.seed || incoming.value("dimension","") != dimension || incoming.value("y",64) != mapView.y) return;
+    mapDecode(mapView,incoming);
+}
+
+static MapAtlas::Region mapTexture(const MapTile &tile, const MapView &view, bool relief, bool coastlines, int highlight) {
+    uint64_t variant = static_cast<uint64_t>((highlight + 1) * 4 + (relief ? 1 : 0) + (coastlines ? 2 : 0));
+    return MapAtlas::get((tile.atlasKey << 12) | variant,[&](auto &pixels) {
+        for (int i = 0; i < 1024; ++i) {
+            int value = tile.cells[i]; ImU32 color = view.colors[value];
+            float factor = (relief ? tile.shade[i] / 128.0f : 1.0f) * (highlight >= 0 && value != highlight ? 0.35f : 1.0f);
+            if (coastlines && ((i % 32 < 31 && view.water[value] != view.water[tile.cells[i + 1]]) || (i < 992 && view.water[value] != view.water[tile.cells[i + 32]]))) factor *= 0.78f;
+            pixels[i] = IM_COL32(std::min(255,int((color & 255) * factor)),std::min(255,int(((color >> 8) & 255) * factor)),std::min(255,int(((color >> 16) & 255) * factor)),255);
+        }
+    });
 }
 
 static void mapSection(const char *name) {
@@ -309,38 +342,16 @@ static void mapPanel(Json &command) {
         int tileX = tile.x * drawnStep * 32, tileZ = tile.z * drawnStep * 32;
         if (tileX > maxX || tileZ > maxZ || tileX + drawnStep * 32 < minX || tileZ + drawnStep * 32 < minZ) continue;
         if (hovered && mouseX >= tileX && mouseX < tileX + drawnStep * 32 && mouseZ >= tileZ && mouseZ < tileZ + drawnStep * 32) biome = tile.cells[static_cast<int>((mouseZ - tileZ) / drawnStep) * 32 + static_cast<int>((mouseX - tileX) / drawnStep)];
-        const auto &spans = preferences.relief ? tile.relief : tile.flat;
-        draw->PrimReserve(static_cast<int>(spans.size()) * 6,static_cast<int>(spans.size()) * 4);
-        int rendered = 0;
-        for (const auto &span : spans) {
-            int row = span.start / 32, col = span.start % 32, value = span.biome;
-            ImVec2 a = point(tileX + col * drawnStep,tileZ + row * drawnStep), b = point(tileX + (col + span.count) * drawnStep,tileZ + (row + 1) * drawnStep);
-            if (b.x < start.x || a.x > end.x || b.y < start.y || a.y > end.y) continue;
-            ImU32 tint = biomeColors[value];
-            if (preferences.relief) {
-                int shade = span.shade;
-                tint = IM_COL32(std::min(255,static_cast<int>((tint & 255) * shade / 128)),std::min(255,static_cast<int>(((tint >> 8) & 255) * shade / 128)),std::min(255,static_cast<int>(((tint >> 16) & 255) * shade / 128)),255);
-            }
-            draw->PrimRect({std::floor(a.x),std::floor(a.y)},{std::floor(b.x),std::floor(b.y)},tint);
-            rendered++;
-            ImVec2 clippedA{std::max(a.x,start.x),std::max(a.y,start.y)}, clippedB{std::min(b.x,end.x),std::min(b.y,end.y)};
-            view.areas[value] += (clippedB.x - clippedA.x) * (clippedB.y - clippedA.y);
-            ImVec2 anchor{(clippedA.x + clippedB.x) / 2,(clippedA.y + clippedB.y) / 2};
-            float distanceX = anchor.x - middle.x, distanceY = anchor.y - middle.y;
-            float distance = distanceX * distanceX + distanceY * distanceY;
+        auto texture = mapTexture(tile,view,preferences.relief,preferences.coastlines,view.highlight);
+        if (texture.ready) draw->AddImage(MapAtlas::texture,point(tileX,tileZ),point(tileX + drawnStep * 32,tileZ + drawnStep * 32),texture.first,texture.last);
+        ImVec2 a = point(tileX,tileZ), b = point(tileX + drawnStep * 32,tileZ + drawnStep * 32);
+        double area = std::max(0.0f,std::min(b.x,end.x) - std::max(a.x,start.x)) * std::max(0.0f,std::min(b.y,end.y) - std::max(a.y,start.y));
+        for (size_t value = 0; value < tile.counts.size(); ++value) if (tile.counts[value]) {
+            view.areas[value] += area * tile.counts[value] / 1024;
+            int index = tile.anchors[value];
+            auto anchor = point(tileX + (index % 32 + 0.5) * drawnStep,tileZ + (index / 32 + 0.5) * drawnStep);
+            float distance = std::hypot(anchor.x - middle.x,anchor.y - middle.y);
             if (distance < biomeDistances[value]) { biomeDistances[value] = distance; biomeAnchors[value] = anchor; }
-        }
-        int unused = static_cast<int>(spans.size()) - rendered;
-        draw->PrimUnreserve(unused * 6,unused * 4);
-        if (preferences.coastlines && drawnStep / view.blocksPerPixel >= 1.5) {
-            auto water = [&](int value) { return view.water[value]; };
-            for (int row = 0; row < 32; row++) for (int col = 0; col < 32; col++) {
-                bool wet = water(tile.cells[row * 32 + col]);
-                ImVec2 at = point(tileX + col * drawnStep,tileZ + row * drawnStep);
-                ImVec2 next = point(tileX + (col + 1) * drawnStep,tileZ + (row + 1) * drawnStep);
-                if (col < 31 && wet != water(tile.cells[row * 32 + col + 1])) draw->AddLine({next.x,at.y},next,IM_COL32(33,57,64,105),uiScale);
-                if (row < 31 && wet != water(tile.cells[(row + 1) * 32 + col])) draw->AddLine({at.x,next.y},next,IM_COL32(33,57,64,105),uiScale);
-            }
         }
     }
     if (preferences.grid != 0) {

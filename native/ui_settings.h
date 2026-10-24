@@ -1,9 +1,13 @@
 static void hudSettings();
+static void minimapSettings();
 
 struct UiPreferences {
     float width = 1040, height = 760, x = -1, y = -1, sidebarWidth = 240;
     float opacity = 1, markerSize = 4, zoomSpeed = 0.5f;
     int detail = 2, grid = 1, hudAnchor = 1;
+    float miniSize = 224, miniZoom = 1;
+    int miniMode = 0, miniTarget = 0, miniAnchor = 0;
+    bool miniEnabled = true, miniRotate = false, miniStructures = true;
     float hudScale = 1, hudOpacity = 0.86f, hudX = 0.02f, hudY = 0.1f;
     bool relief = true, coastlines = true, hudEnabled = false;
     bool hudCoordinates = true, hudBiome = true, hudDimension = true, hudFps = true, hudRecovery = true, hudEvidence = false, hudWaypoint = true, hudSeed = false, hudAutoTarget = true;
@@ -19,7 +23,7 @@ static bool hudEditing = false;
 static ImVec2 requestedWindowSize{-1,-1};
 
 static Json preferenceValues() {
-    return {{"width",preferences.width},{"height",preferences.height},{"x",preferences.x},{"y",preferences.y},{"sidebarWidth",preferences.sidebarWidth},{"opacity",preferences.opacity},{"markerSize",preferences.markerSize},{"zoomSpeed",preferences.zoomSpeed},{"detail",preferences.detail},{"grid",preferences.grid},{"maximized",preferences.maximized},{"controls",preferences.controls},{"biomeLabels",preferences.biomeLabels},{"structureLabels",preferences.structureLabels},{"showPlayer",preferences.showPlayer},{"section",activeSection},{"relief",preferences.relief},{"coastlines",preferences.coastlines},{"hudEnabled",preferences.hudEnabled},{"hudScale",preferences.hudScale},{"hudOpacity",preferences.hudOpacity},{"hudAnchor",preferences.hudAnchor},{"hudX",preferences.hudX},{"hudY",preferences.hudY},{"hudCoordinates",preferences.hudCoordinates},{"hudBiome",preferences.hudBiome},{"hudDimension",preferences.hudDimension},{"hudFps",preferences.hudFps},{"hudRecovery",preferences.hudRecovery},{"hudEvidence",preferences.hudEvidence},{"hudWaypoint",preferences.hudWaypoint},{"hudSeed",preferences.hudSeed},{"hudAutoTarget",preferences.hudAutoTarget}};
+    return {{"miniSize",preferences.miniSize},{"miniZoom",preferences.miniZoom},{"miniMode",preferences.miniMode},{"miniTarget",preferences.miniTarget},{"miniAnchor",preferences.miniAnchor},{"miniEnabled",preferences.miniEnabled},{"miniRotate",preferences.miniRotate},{"miniStructures",preferences.miniStructures},{"width",preferences.width},{"height",preferences.height},{"x",preferences.x},{"y",preferences.y},{"sidebarWidth",preferences.sidebarWidth},{"opacity",preferences.opacity},{"markerSize",preferences.markerSize},{"zoomSpeed",preferences.zoomSpeed},{"detail",preferences.detail},{"grid",preferences.grid},{"maximized",preferences.maximized},{"controls",preferences.controls},{"biomeLabels",preferences.biomeLabels},{"structureLabels",preferences.structureLabels},{"showPlayer",preferences.showPlayer},{"section",activeSection},{"relief",preferences.relief},{"coastlines",preferences.coastlines},{"hudEnabled",preferences.hudEnabled},{"hudScale",preferences.hudScale},{"hudOpacity",preferences.hudOpacity},{"hudAnchor",preferences.hudAnchor},{"hudX",preferences.hudX},{"hudY",preferences.hudY},{"hudCoordinates",preferences.hudCoordinates},{"hudBiome",preferences.hudBiome},{"hudDimension",preferences.hudDimension},{"hudFps",preferences.hudFps},{"hudRecovery",preferences.hudRecovery},{"hudEvidence",preferences.hudEvidence},{"hudWaypoint",preferences.hudWaypoint},{"hudSeed",preferences.hudSeed},{"hudAutoTarget",preferences.hudAutoTarget}};
 }
 
 static void loadPreferences() {
@@ -28,7 +32,8 @@ static void loadPreferences() {
         if (revision != hudRevisionSeen) {
             hudRevisionSeen = revision;
             preferences.hudEnabled = state.value("uiSettings",Json::object()).value("hudEnabled",false);
-            if (!savedPreferences.empty()) { auto saved = Json::parse(savedPreferences); saved["hudEnabled"] = preferences.hudEnabled; savedPreferences = saved.dump(); }
+            preferences.miniEnabled = state.value("uiSettings",Json::object()).value("miniEnabled",true);
+            if (!savedPreferences.empty()) { auto saved = Json::parse(savedPreferences); saved["hudEnabled"] = preferences.hudEnabled; saved["miniEnabled"] = preferences.miniEnabled; savedPreferences = saved.dump(); }
         }
         return;
     }
@@ -49,6 +54,9 @@ static void loadPreferences() {
     preferences.hudDimension = settings.value("hudDimension",true); preferences.hudFps = settings.value("hudFps",true);
     preferences.hudRecovery = settings.value("hudRecovery",true); preferences.hudEvidence = settings.value("hudEvidence",false);
     preferences.hudWaypoint = settings.value("hudWaypoint",true); preferences.hudSeed = settings.value("hudSeed",false); preferences.hudAutoTarget = settings.value("hudAutoTarget",true);
+    preferences.miniEnabled = settings.value("miniEnabled",true); preferences.miniRotate = settings.value("miniRotate",false); preferences.miniStructures = settings.value("miniStructures",true);
+    preferences.miniSize = settings.value("miniSize",224.0f); preferences.miniZoom = settings.value("miniZoom",1.0f);
+    preferences.miniMode = settings.value("miniMode",0); preferences.miniTarget = settings.value("miniTarget",0); preferences.miniAnchor = settings.value("miniAnchor",0);
     hudRevisionSeen = state.value("hudRevision",0);
     activeSection = settings.value("section",activeSection);
     savedPreferences = preferenceValues().dump();
@@ -104,6 +112,7 @@ static void settingsPanel() {
     ImGui::BeginChild("settings-map", {std::min(360 * uiScale,ImGui::GetContentRegionAvail().x),390 * uiScale},ImGuiChildFlags_AlwaysUseWindowPadding);
     mapAppearanceSettings(); ImGui::EndChild();
     ImGui::PopStyleVar();
+    if (ImGui::CollapsingHeader("Minimap",ImGuiTreeNodeFlags_DefaultOpen)) minimapSettings();
     if (ImGui::CollapsingHeader("Gameplay overlay",ImGuiTreeNodeFlags_DefaultOpen)) hudSettings();
     if (ImGui::Button("Reset settings")) { preferences = UiPreferences{}; requestedWindowSize = {1040,760}; restoreWindow = true; }
     ImGui::TextDisabled("Window and map settings save automatically.");

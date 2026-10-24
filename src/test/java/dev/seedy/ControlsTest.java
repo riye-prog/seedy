@@ -15,6 +15,8 @@ class ControlsTest {
         assertSame(controls.panel().getCategory(),controls.overlay().getCategory());
         assertEquals(InputConstants.KEY_F8,controls.panel().getDefaultKey().getValue());
         assertEquals(InputConstants.KEY_F9,controls.overlay().getDefaultKey().getValue());
+        assertEquals(InputConstants.KEY_F10,controls.minimap().getDefaultKey().getValue());
+        assertSame(controls.panel().getCategory(),controls.minimap().getCategory());
         assertNotSame(controls.panel(),controls.overlay());
     }
 }

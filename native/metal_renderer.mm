@@ -3,6 +3,7 @@
 #include <imgui_impl_metal.h>
 #include <Metal/Metal.h>
 #include <stdexcept>
+#include "metal_atlas.h"
 
 namespace MetalRenderer {
     static id<MTLDevice> device;
@@ -11,7 +12,7 @@ namespace MetalRenderer {
     static bool initialized = false;
 
     void shutdown() {
-        if (initialized) ImGui_ImplMetal_Shutdown();
+        if (initialized) { MetalAtlas::shutdown(); ImGui_ImplMetal_Shutdown(); }
         initialized = false;
         commands = nil;
         pass = nil;
@@ -38,12 +39,14 @@ namespace MetalRenderer {
             commands = incoming;
             pass.colorAttachments[0].texture = texture;
             ImGui_ImplMetal_NewFrame(pass);
+            MetalAtlas::prepare(device);
         }
     }
 
     void render(ImDrawData *data, int width, int height) {
         if (!data || !data->TotalVtxCount || width <= 0 || height <= 0) return;
         @autoreleasepool {
+            MetalAtlas::upload(commands);
             auto encoder = [commands renderCommandEncoderWithDescriptor:pass];
             if (!encoder) throw std::runtime_error("Could not record the Metal overlay");
             encoder.label = @"Seedy";
