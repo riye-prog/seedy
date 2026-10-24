@@ -15,11 +15,12 @@ namespace MapAtlas {
     inline std::unordered_map<uint64_t, Entry> entries;
     inline std::vector<Upload> uploads;
     inline ImTextureID texture = 0;
+    inline ImTextureID nearestTexture = 0;
     inline uint64_t frame = 0, sequence = 0;
     inline bool writable = false;
 
     inline void begin() { ++frame; uploads.clear(); writable = false; }
-    inline void reset() { entries.clear(); uploads.clear(); texture = 0; writable = false; }
+    inline void reset() { entries.clear(); uploads.clear(); texture = 0; nearestTexture = 0; writable = false; }
     inline Region region(int slot) {
         int x = (slot % columns) * pitch + 1, y = (slot / columns) * pitch + 1;
         return {{x / float(side),y / float(side)},{(x + tileSide) / float(side),(y + tileSide) / float(side)},true};

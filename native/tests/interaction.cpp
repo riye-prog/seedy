@@ -55,7 +55,35 @@ static void testMapCaching() {
     require(terrainTiles.empty(),"A late terrain packet crossed a world boundary");
     receiveTerrain({{"epoch",2},{"dimension","the_nether"},{"x",0},{"z",0},{"runs",{257,0x6fa554}}});
     require(terrainTiles.empty(),"Malformed terrain data was accepted");
+    std::string hd;
+    for (int i = 0; i < 4096; ++i) hd += "EjRW";
+    receiveTerrain({{"epoch",2},{"dimension","the_nether"},{"x",0},{"z",0},{"resolution",64},{"pixels",hd}});
+    require(terrainTiles.size() == 1 && terrainTiles.begin()->second.pixels[4095] == IM_COL32(18,52,86,255),"HD terrain RGB channels were corrupted");
+    require(terrainTiles.begin()->second.overview[0] == IM_COL32(18,52,86,255),"Terrain overview changed uniform colors");
+    for (const auto &mip : terrainTiles.begin()->second.mipmaps) require(std::all_of(mip.begin(),mip.end(),[](ImU32 pixel) { return pixel == IM_COL32(18,52,86,255); }),"Minimap mipmaps changed uniform colors");
+    terrainKey = terrainTiles.begin()->second.key;
+    hd[0] = '_';
+    receiveTerrain({{"epoch",2},{"dimension","the_nether"},{"x",0},{"z",0},{"resolution",64},{"pixels",hd}});
+    require(terrainTiles.begin()->second.key == terrainKey,"Malformed HD terrain replaced a valid tile");
     MapAtlas::reset();
+}
+
+static void testCompactMinimap() {
+    auto previousState = state;
+    auto previousPreferences = preferences;
+    double previousX = liveMapX, previousZ = liveMapZ, previousYaw = liveMapYaw;
+    state = {{"connected",true},{"dimension","overworld"},{"seed",""},{"y",120},{"biome","minecraft:old_growth_spruce_taiga"}};
+    preferences.miniEnabled = true; preferences.miniSize = 128; preferences.miniAnchor = 0;
+    liveMapX = -29970000; liveMapZ = -29970000;
+    for (double yaw : {0.0,45.0,90.0,180.0,270.0}) {
+        liveMapYaw = yaw;
+        ImGui::NewFrame(); drawMinimap(1440,1000); ImGui::Render();
+        auto window = ImGui::FindWindowByName("Seedy minimap");
+        require(window && (window->Flags & ImGuiWindowFlags_NoInputs) == ImGuiWindowFlags_NoInputs,"Minimap captured gameplay input");
+        auto region = drawRegion(ImGui::GetDrawData(),1440,1000);
+        require(region.width <= window->Size.x + 4 && region.height <= window->Size.y + 4,"Compact minimap text exceeded its frame");
+    }
+    state = std::move(previousState); preferences = previousPreferences; liveMapX = previousX; liveMapZ = previousZ; liveMapYaw = previousYaw;
 }
 
 static Json tick() {
@@ -389,6 +417,7 @@ int main(int argc, char **argv) {
         preferences.hudEnabled = false; hudFrame(false);
         require(ImGui::GetDrawData()->TotalVtxCount == 0,"Disabled gameplay overlay was still drawn");
         testMapCaching();
+        testCompactMinimap();
         ImGui::NewFrame();
         auto clipped = ImGui::GetForegroundDrawList();
         clipped->PushClipRect({100,100},{200,200});

@@ -27,7 +27,9 @@ final class TerrainMap implements AutoCloseable {
     private ClientLevel level;
     private List<ChunkPos> nearby = List.of();
     private int centerX = Integer.MIN_VALUE, centerZ, radius, slice, cursor, column, ticks;
-    private int[] colors, heights;
+    private TerrainSurface surface;
+    private final TerrainPalette palette = new TerrainPalette();
+    private final LevelChunk[] sampleChunks = new LevelChunk[9];
     private LevelChunk current;
     private volatile long epoch;
     private final java.util.concurrent.atomic.AtomicInteger encoding = new java.util.concurrent.atomic.AtomicInteger();
@@ -35,8 +37,8 @@ final class TerrainMap implements AutoCloseable {
     void tick(Minecraft client, boolean enabled, double blocksPerPixel, int size, boolean recovering) {
         if (!enabled || client.level == null || client.player == null) return;
         int nextSlice = client.level.dimension().equals(net.minecraft.world.level.Level.NETHER) ? Math.floorDiv(client.player.getBlockY(),8) * 8 + 7 : Integer.MAX_VALUE;
-        if (level != client.level || slice != nextSlice) {
-            level = client.level; slice = nextSlice; epoch++; updates.clear(); scanned.clear(); current = null; centerX = Integer.MIN_VALUE;
+        if (palette.refresh(client) || level != client.level || slice != nextSlice) {
+            level = client.level; slice = nextSlice; epoch++; updates.clear(); scanned.clear(); current = null; java.util.Arrays.fill(sampleChunks,null); centerX = Integer.MIN_VALUE;
             updates.offer("{\"reset\":" + epoch + ",\"dimension\":\"" + dimension(level) + "\"}");
         }
         ++ticks;
@@ -62,46 +64,60 @@ final class TerrainMap implements AutoCloseable {
                 if (last != null && ticks - last < 200) continue;
                 current = level.getChunkSource().getChunk(chunkX,chunkZ,ChunkStatus.FULL,false);
                 if (current == null || current.isEmpty()) { current = null; continue; }
-                colors = new int[256]; heights = new int[256]; column = 0;
+                surface = new TerrainSurface(); column = 0;
+                for (int dz = -1; dz <= 1; ++dz) for (int dx = -1; dx <= 1; ++dx) sampleChunks[(dz + 1) * 3 + dx + 1] = level.getChunkSource().getChunk(chunkX + dx,chunkZ + dz,ChunkStatus.FULL,false);
             }
-            for (int limit = Math.min(256,column + Math.min(8,budget)); column < limit; ++column, --budget) sample();
-            if (column == 256) {
-                var chunk = current.getPos(); var pixels = colors; var elevations = heights; long token = epoch; String dimension = dimension(level);
+            for (int limit = Math.min(TerrainSurface.COLUMNS,column + Math.min(4,budget)); column < limit; ++column, --budget) sample(client);
+            if (column == TerrainSurface.COLUMNS) {
+                var chunk = current.getPos(); var captured = surface; long token = epoch; String dimension = dimension(level);
                 scanned.put(chunk.pack(),(long)ticks);
                 while (scanned.size() > 1024) scanned.remove(scanned.keySet().iterator().next());
                 current = null;
                 encoding.incrementAndGet();
                 worker.execute(() -> {
                     try {
-                    if (token != epoch) return;
-                    var data = encode(chunk.x(),chunk.z(),pixels,elevations);
-                    data.addProperty("epoch",token); data.addProperty("dimension",dimension);
-                    if (token == epoch) updates.offer(data.toString());
+                        if (token != epoch) return;
+                        var data = captured.encode(chunk.x(),chunk.z());
+                        data.addProperty("epoch",token); data.addProperty("dimension",dimension);
+                        if (token == epoch) updates.offer(data.toString());
                     } finally { encoding.decrementAndGet(); }
                 });
             }
         }
     }
 
-    private void sample() {
-        int x = current.getPos().getMinBlockX() + column % 16, z = current.getPos().getMinBlockZ() + column / 16;
-        int top = Math.min(slice,current.getHeight(Heightmap.Types.WORLD_SURFACE,column % 16,column / 16));
+    private void sample(Minecraft client) {
+        int localX = column % TerrainSurface.SIDE - TerrainSurface.BORDER, localZ = column / TerrainSurface.SIDE - TerrainSurface.BORDER;
+        var chunk = sampleChunks[(Math.floorDiv(localZ,16) + 1) * 3 + Math.floorDiv(localX,16) + 1];
+        if (chunk == null || chunk.isEmpty()) return;
+        int x = current.getPos().getMinBlockX() + localX, z = current.getPos().getMinBlockZ() + localZ;
+        int top = Math.min(slice,chunk.getHeight(Heightmap.Types.WORLD_SURFACE,Math.floorMod(localX,16),Math.floorMod(localZ,16)));
         int bottom = Math.max(level.getMinY(),top - 48);
-        int color = 0x19202a;
+        surface.materials[column] = TerrainPalette.VOID; surface.tints[column] = 0xffffff;
         for (int y = top; y >= bottom; --y) {
             position.set(x,y,z);
-            var block = current.getBlockState(position);
-            var mapColor = block.getMapColor(level,position);
-            if (mapColor == MapColor.NONE) continue;
-            color = mapColor.col;
-            var biome = level.getBiome(position).value();
-            if (mapColor == MapColor.WATER) color = biome.getWaterColor();
-            else if (mapColor == MapColor.GRASS) color = biome.getGrassColor(x,z);
-            else if (block.getBlock() instanceof LeavesBlock) color = biome.getFoliageColor();
-            top = y;
-            break;
+            var block = chunk.getBlockState(position);
+            if (block.isAir()) continue;
+            var material = palette.get(client,block);
+            if (!material.top() && !block.isSolidRender() && !block.hasBlockEntity() && !(block.getBlock() instanceof LeavesBlock)) continue;
+            surface.materials[column] = material;
+            surface.tints[column] = palette.tint(client,level,block,position,material);
+            surface.heights[column] = y;
+            surface.ground[column] = 0x263c29;
+            boolean water = (material.flags() & TerrainPalette.WATER) != 0, translucent = (material.flags() & (TerrainPalette.FOLIAGE | TerrainPalette.TRANSLUCENT)) != 0;
+            if (water || translucent) for (int depth = 1; depth <= (water ? 24 : 14) && y - depth >= level.getMinY(); ++depth) {
+                position.set(x,y - depth,z);
+                var under = chunk.getBlockState(position);
+                surface.depths[column] = depth;
+                if (under.isAir() || under.getBlock() instanceof LeavesBlock || under.getFluidState().is(net.minecraft.tags.FluidTags.WATER)) continue;
+                var color = under.getMapColor(level,position);
+                if (color == MapColor.NONE) continue;
+                surface.ground[column] = color == MapColor.GRASS ? level.getBiome(position).value().getGrassColor(x,z) : color.col;
+                break;
+            }
+            return;
         }
-        colors[column] = color; heights[column] = top;
+        surface.heights[column] = level.getMinY() - 1;
     }
 
     static JsonObject encode(int x, int z, int[] colors, int[] heights) {
@@ -122,5 +138,10 @@ final class TerrainMap implements AutoCloseable {
 
     private static String dimension(ClientLevel level) { return level.dimension().identifier().getPath(); }
     String poll() { return updates.poll(); }
+    void reset() {
+        epoch++; level = null; current = null; surface = null; java.util.Arrays.fill(sampleChunks,null);
+        nearby = List.of(); scanned.clear(); centerX = Integer.MIN_VALUE; radius = 0; cursor = 0;
+        updates.clear(); updates.offer("{\"reset\":" + epoch + ",\"dimension\":\"\"}");
+    }
     @Override public void close() { epoch++; updates.clear(); worker.shutdownNow(); }
 }

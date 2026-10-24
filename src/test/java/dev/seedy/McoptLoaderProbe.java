@@ -24,6 +24,9 @@ public final class McoptLoaderProbe {
         var vulkanAccessor = Class.forName("dev.seedy.mixin.VulkanEncoderAccessor",false,loader);
         if (!vulkanAccessor.isAssignableFrom(vulkanEncoder)) throw new IllegalStateException("Vulkan encoder accessor was not applied");
         var surface = Class.forName(prefix + "VulkanGpuSurface",false,loader);
+        var sprite = Class.forName("net.minecraft.client.renderer.texture.SpriteContents",false,loader);
+        var spriteAccess = Class.forName("dev.seedy.mixin.SpriteContentsAccess",false,loader);
+        if (!spriteAccess.isAssignableFrom(sprite)) throw new IllegalStateException("Minimap sprite accessor was not applied");
         if (Arrays.stream(surface.getDeclaredMethods()).noneMatch(method -> method.getName().contains("seedyBeforeBlit"))) throw new IllegalStateException("Vulkan surface hook was not applied");
         String result = "{\"mcopt\":" + expected + ",\"fabric_mixin_application\":true,\"minecraft_main_invoked\":false}";
         Files.writeString(Path.of(arguments[2]),result + "\n");

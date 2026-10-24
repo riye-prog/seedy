@@ -4,31 +4,37 @@
 #include <memory>
 #include <cstring>
 #include <stdexcept>
+extern "C" void seedy_imgui_metal_nearest(ImTextureID texture);
 
 namespace MetalAtlas {
     struct Staging { id<MTLBuffer> buffer; std::shared_ptr<std::atomic<bool>> ready = std::make_shared<std::atomic<bool>>(true); };
     inline id<MTLTexture> texture;
+    inline id<MTLTexture> nearestView;
     inline std::array<Staging,4> staging;
     inline Staging *available = nullptr;
     constexpr size_t rowBytes = 256, tileBytes = rowBytes * MapAtlas::pitch;
 
     inline void shutdown() {
-        texture = nil; available = nullptr;
+        seedy_imgui_metal_nearest(0); nearestView = nil; texture = nil; available = nullptr;
         for (auto &slot : staging) { slot.buffer = nil; slot.ready = std::make_shared<std::atomic<bool>>(true); }
         MapAtlas::reset();
     }
     inline void prepare(id<MTLDevice> device) {
         if (!texture) {
             auto descriptor = [MTLTextureDescriptor texture2DDescriptorWithPixelFormat:MTLPixelFormatRGBA8Unorm width:MapAtlas::side height:MapAtlas::side mipmapped:NO];
-            descriptor.storageMode = MTLStorageModePrivate; descriptor.usage = MTLTextureUsageShaderRead;
+            descriptor.storageMode = MTLStorageModePrivate; descriptor.usage = MTLTextureUsageShaderRead | MTLTextureUsagePixelFormatView;
             texture = [device newTextureWithDescriptor:descriptor];
             if (!texture) throw std::runtime_error("Map texture allocation failed");
             texture.label = @"Seedy map atlas";
+            nearestView = [texture newTextureViewWithPixelFormat:MTLPixelFormatRGBA8Unorm];
+            if (!nearestView) throw std::runtime_error("Minimap texture view allocation failed");
         }
         available = nullptr;
         for (auto &slot : staging) if (slot.ready->load(std::memory_order_acquire)) { available = &slot; break; }
         if (available && !available->buffer) available->buffer = [device newBufferWithLength:tileBytes * MapAtlas::uploadLimit options:MTLResourceStorageModeShared];
         MapAtlas::texture = reinterpret_cast<ImTextureID>((__bridge void *)texture);
+        MapAtlas::nearestTexture = reinterpret_cast<ImTextureID>((__bridge void *)nearestView);
+        seedy_imgui_metal_nearest(MapAtlas::nearestTexture);
         MapAtlas::writable = available && available->buffer;
     }
     inline void upload(id<MTLCommandBuffer> commands) {

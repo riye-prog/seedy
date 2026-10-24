@@ -1,0 +1,97 @@
+{
+  "scope": "command-line saved-world rendering; no Minecraft instance launched; not a live in-game FPS measurement",
+  "publication": "approved by user for release",
+  "full_test_suites_before_final_visual_tuning": {
+    "26.2": {
+      "tests": 94,
+      "failures": 0,
+      "skipped": 1
+    },
+    "26.3": {
+      "tests": 93,
+      "failures": 0,
+      "skipped": 1
+    }
+  },
+  "terrain_regression_tests": {
+    "26.2": {
+      "tests": 6,
+      "failures": 0,
+      "errors": 0
+    },
+    "26.3": {
+      "tests": 6,
+      "failures": 0,
+      "errors": 0
+    }
+  },
+  "native_interaction_tests": "passed, including compact rotating minimap",
+  "windows_x86_64_native_build": "passed",
+  "jars": "26.2 and 26.3 built with matching current macOS and Windows GUI payloads",
+  "vulkan": {
+    "atlas_tiles": 720,
+    "cpu_record_median_ms": 0.080708,
+    "cpu_record_p95_ms": 0.180125,
+    "extra_fence_waits": 0,
+    "extra_queue_submits": 0,
+    "framebuffer_creations": 0,
+    "frames": 120,
+    "gpu": "Apple M3",
+    "gpu_median_ms": 0.1735,
+    "gpu_p95_ms": 0.311833,
+    "height": 1964,
+    "maximum_vertices": 3600,
+    "minimap": true,
+    "panel": false,
+    "rendered_pixels_per_frame": 374496,
+    "width": 3024
+  },
+  "metal": {
+    "device": "Apple M3",
+    "mcopt": "0.3.0-alpha.2",
+    "width": 1440,
+    "scope": "actual released mcopt native library and Seedy JNI renderer; no Minecraft instance launched; not an in-game FPS measurement",
+    "one_mcopt_command_buffer_per_frame": true,
+    "height": 1000,
+    "frames": [
+      {
+        "frames": 120,
+        "changed_pixels": 62000,
+        "hud": true,
+        "minimap": false,
+        "panel": false,
+        "image": "/tmp/seedy-minimap-review-metal-hud.bgra"
+      },
+      {
+        "frames": 8,
+        "changed_pixels": 790256,
+        "hud": false,
+        "minimap": false,
+        "panel": true,
+        "image": "/tmp/seedy-minimap-review-metal-panel.bgra"
+      },
+      {
+        "frames": 8,
+        "changed_pixels": 2991,
+        "hud": false,
+        "minimap": false,
+        "panel": false,
+        "image": "/tmp/seedy-minimap-review-metal-outlines.bgra"
+      },
+      {
+        "frames": 120,
+        "changed_pixels": 154322,
+        "hud": true,
+        "minimap": true,
+        "panel": false,
+        "image": "/tmp/seedy-minimap-review-metal-minimap.bgra"
+      }
+    ],
+    "jni_cpu_median_ms": 0.0185,
+    "in_flight": 2,
+    "minimap_jni_cpu_ms": {
+      "median": 0.029458,
+      "p95": 0.054458
+    }
+  }
+}

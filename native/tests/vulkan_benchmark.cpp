@@ -101,14 +101,29 @@ int main(int argc, char **argv) {
         configureAppearance(2); io.Fonts->Build();
         state = {{"connected",true},{"verified",true},{"dimension","overworld"},{"biome","minecraft:cherry_grove"},{"x",128},{"y",72},{"z",96},{"yaw",45.0},{"fps",144},{"uiSettings",{{"hudEnabled",true},{"miniEnabled",false}}},{"waypoint",{{"name","minecraft:ancient_city"},{"x",-596},{"z",-240},{"dimension","overworld"}}}};
         bool mapTest = argc > 3;
+        bool panelTest = argc > 4 && std::string(argv[4]) == "panel";
         if (mapTest) {
             Json fixture; std::ifstream(argv[3]) >> fixture;
             mapDecode(miniView,fixture);
+            if (panelTest) {
+                state["map"] = fixture; state["catalogs"]["overworld"]["structures"] = Json::array({"minecraft:villages"});
+                mapView.initialized = true; mapView.seed = fixture.value("seed",""); mapView.requestId = fixture.value("id",0LL); mapView.x = 128; mapView.z = 96; mapView.blocksPerPixel = 4;
+                activeSection = 5;
+            }
             state["seed"] = fixture.value("seed",""); state["gameVersion"] = "26.3"; state["generationVersion"] = "26.3";
             state["uiSettings"]["miniEnabled"] = true; state["uiSettings"]["hudEnabled"] = false;
+            if (argc > 4 && std::string(argv[4]) == "biomes") state["uiSettings"]["miniMode"] = 2;
             liveMapX = 128; liveMapZ = 96; liveMapYaw = 45;
             receiveTerrain({{"reset",1},{"dimension","overworld"}});
-            for (int z = 5; z < 9; ++z) for (int x = 7; x < 11; ++x) receiveTerrain({{"epoch",1},{"dimension","overworld"},{"x",x},{"z",z},{"runs",{128,0x75a85a,128,0x376b43}}});
+            if (argc > 5) {
+                Json terrain; std::ifstream(argv[5]) >> terrain;
+                for (const auto &tile : terrain["terrain"]) receiveTerrain(tile);
+                liveMapX = terrain.value("x",0); liveMapZ = terrain.value("z",0);
+                state["x"] = liveMapX; state["z"] = liveMapZ; state["y"] = terrain.value("y",64); state["biome"] = terrain.value("biome","minecraft:plains");
+                state["seed"] = terrain.value("seed",""); miniView.data["seed"] = state["seed"];
+                miniView.data["markers"] = terrain.value("markers",Json::array());
+                state["uiSettings"]["miniMode"] = 1;
+            } else for (int z = 5; z < 9; ++z) for (int x = 7; x < 11; ++x) receiveTerrain({{"epoch",1},{"dimension","overworld"},{"x",x},{"z",z},{"runs",{128,0x75a85a,128,0x376b43}}});
         }
         jlong handles[13] = {reinterpret_cast<jlong>(getInstance),reinterpret_cast<jlong>(instance),reinterpret_cast<jlong>(physical),reinterpret_cast<jlong>(device),reinterpret_cast<jlong>(queue),static_cast<jlong>(family),reinterpret_cast<jlong>(image),reinterpret_cast<jlong>(view),static_cast<jlong>(imageInfo.format),reinterpret_cast<jlong>(commands[1])};
         VulkanRenderer::prepare(handles);
@@ -123,7 +138,7 @@ int main(int argc, char **argv) {
             requireVk(vkResetCommandPool(device,pool,0)); requireVk(vkResetFences(device,1,&done));
             MapAtlas::begin(); handles[10] = frame + 25; handles[11] = frame + 24; handles[12] = 1;
             VulkanRenderer::prepare(handles);
-            ImGui_ImplVulkan_NewFrame(); ImGui::NewFrame(); drawOverlayFrame(width,height,false,true); ImGui::Render();
+            ImGui_ImplVulkan_NewFrame(); ImGui::NewFrame(); drawOverlayFrame(width,height,panelTest,!panelTest); ImGui::Render();
             maximumVertices = std::max(maximumVertices,ImGui::GetDrawData()->TotalVtxCount);
             if (frame >= 0 && !MapAtlas::uploads.empty()) throw std::runtime_error("Unchanged map tiles were uploaded again");
             VkCommandBufferBeginInfo begin{VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO}; begin.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
@@ -168,10 +183,10 @@ int main(int argc, char **argv) {
             vkDestroyBuffer(device,buffer,nullptr); vkFreeMemory(device,readback,nullptr);
         }
         Json result = {{"gpu",properties.deviceName},{"width",width},{"height",height},{"frames",count},{"cpu_record_median_ms",percentile(cpu,0.5)},{"cpu_record_p95_ms",percentile(cpu,0.95)},{"gpu_median_ms",percentile(gpu,0.5)},{"gpu_p95_ms",percentile(gpu,0.95)},{"extra_queue_submits",extraSubmits},{"extra_fence_waits",extraWaits},{"framebuffer_creations",framebuffers},{"rendered_pixels_per_frame",renderedPixels / count}};
-        result["minimap"] = mapTest; result["maximum_vertices"] = maximumVertices; result["atlas_tiles"] = MapAtlas::entries.size();
+        result["minimap"] = mapTest; result["panel"] = panelTest; result["maximum_vertices"] = maximumVertices; result["atlas_tiles"] = MapAtlas::entries.size();
 #ifndef SEEDY_LEGACY_RENDERER
         if (extraSubmits || extraWaits || framebuffers) throw std::runtime_error("HUD reintroduced per-frame GPU submission or resource overhead");
-        if (renderedPixels / count > static_cast<uint64_t>(width) * height / 8) throw std::runtime_error("HUD rendering area is too large");
+        if (!panelTest && renderedPixels / count > static_cast<uint64_t>(width) * height / 8) throw std::runtime_error("HUD rendering area is too large");
 #endif
         std::cout << result.dump(2) << std::endl;
         VulkanRenderer::shutdown(); ImGui::DestroyContext(context); context = nullptr;

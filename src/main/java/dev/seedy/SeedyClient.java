@@ -24,6 +24,7 @@ public final class SeedyClient implements ClientModInitializer {
     public static boolean matchesToggle(KeyEvent event) { return toggle != null && toggle.matches(event); }
     public static boolean matchesToggle(MouseButtonEvent event) { return toggle != null && toggle.matchesMouse(event); }
     public static boolean matchesHudToggle(KeyEvent event) { return hudToggle != null && hudToggle.matches(event); }
+    public static boolean matchesMinimapToggle(KeyEvent event) { return miniToggle != null && miniToggle.matches(event); }
     public static void rescan() { COLLECTOR.rescan(); BedrockRecovery.INSTANCE.rescan(); }
     public static int pendingChunks() { return COLLECTOR.pending(); }
     record Controls(KeyMapping panel, KeyMapping overlay, KeyMapping minimap) { }

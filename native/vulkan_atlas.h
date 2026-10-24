@@ -13,6 +13,8 @@ namespace VulkanAtlas {
     inline VkImageView view = VK_NULL_HANDLE;
     inline VkSampler sampler = VK_NULL_HANDLE;
     inline VkDescriptorSet descriptor = VK_NULL_HANDLE;
+    inline VkDescriptorSet nearestDescriptor = VK_NULL_HANDLE;
+    inline VkSampler nearestSampler = VK_NULL_HANDLE;
     inline std::array<Staging,4> staging;
     inline Staging *available = nullptr;
     inline bool started = false;
@@ -33,6 +35,9 @@ namespace VulkanAtlas {
     inline void shutdown() {
         if (!device) return;
         if (descriptor) ImGui_ImplVulkan_RemoveTexture(descriptor);
+        if (nearestDescriptor) ImGui_ImplVulkan_RemoveTexture(nearestDescriptor);
+        if (nearestSampler) vkDestroySampler(device,nearestSampler,nullptr);
+        nearestDescriptor = VK_NULL_HANDLE; nearestSampler = VK_NULL_HANDLE;
         for (auto &slot : staging) {
             if (slot.mapped) vkUnmapMemory(device,slot.memory);
             if (slot.buffer) vkDestroyBuffer(device,slot.buffer,nullptr);
@@ -61,6 +66,9 @@ namespace VulkanAtlas {
             samplerInfo.magFilter = VK_FILTER_LINEAR; samplerInfo.minFilter = VK_FILTER_LINEAR; samplerInfo.mipmapMode = VK_SAMPLER_MIPMAP_MODE_NEAREST; samplerInfo.addressModeU = samplerInfo.addressModeV = samplerInfo.addressModeW = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE; samplerInfo.maxLod = 0;
             require(vkCreateSampler(device,&samplerInfo,nullptr,&sampler));
             descriptor = ImGui_ImplVulkan_AddTexture(sampler,view,VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
+            samplerInfo.magFilter = VK_FILTER_NEAREST; samplerInfo.minFilter = VK_FILTER_LINEAR;
+            require(vkCreateSampler(device,&samplerInfo,nullptr,&nearestSampler));
+            nearestDescriptor = ImGui_ImplVulkan_AddTexture(nearestSampler,view,VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
         }
         available = nullptr;
         for (auto &slot : staging) if (!slot.submit || (slot.timeline == static_cast<uint64_t>(handles[12]) && slot.submit <= static_cast<uint64_t>(handles[11]))) { available = &slot; break; }
@@ -72,6 +80,7 @@ namespace VulkanAtlas {
             require(vkBindBufferMemory(device,available->buffer,available->memory,0)); require(vkMapMemory(device,available->memory,0,bytes,0,&available->mapped));
         }
         MapAtlas::texture = reinterpret_cast<ImTextureID>(descriptor);
+        MapAtlas::nearestTexture = reinterpret_cast<ImTextureID>(nearestDescriptor);
         MapAtlas::writable = available && handles[12];
     }
     inline void upload(VkCommandBuffer commands, const jlong *handles) {

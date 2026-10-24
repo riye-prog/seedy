@@ -134,6 +134,11 @@ public final class Workbench implements AutoCloseable {
         int step = 1; while (step * 32 < radius / 6) step *= 2;
         int span = step * 32, x = Math.floorDiv(client.player.getBlockX(),span) * span, z = Math.floorDiv(client.player.getBlockZ(),span) * span;
         int extent = Math.ceilDiv(radius,span) * span;
+        if (Math.abs((long)x) + extent > 29_970_000 || Math.abs((long)z) + extent > 29_970_000) {
+            if (!miniKey.isEmpty()) { miniKey = ""; miniMap.reset(); }
+            miniWarning = "Seed map is outside supported bounds";
+            return;
+        }
         int layer = uiSettings.get("miniTarget").getAsInt();
         String[] targets = switch (dimension) {
             case "the_nether" -> new String[]{"minecraft:fortress","minecraft:bastion_remnant","minecraft:ruined_portals","minecraft:nether_fossils"};
@@ -141,12 +146,13 @@ public final class Workbench implements AutoCloseable {
             default -> new String[]{"minecraft:villages","minecraft:ancient_cities","minecraft:desert_pyramids","minecraft:strongholds"};
         };
         String target = uiSettings.get("miniStructures").getAsBoolean() ? targets[layer] : "";
+        String cityFilter = dimension.equals("the_end") && !target.isEmpty() ? layer == 1 ? "with_elytra" : layer == 2 ? "without_elytra" : "any" : "any";
         Integer salt = null; miniWarning = "";
         if (!target.isEmpty()) try { salt = checkedPlacementSalt(target); } catch (IllegalArgumentException conflict) { miniWarning = conflict.getMessage(); }
-        String key = seed + dimension + x + ":" + z + ":" + step + ":" + extent + target + salt + miniWarning;
+        String key = seed + dimension + x + ":" + z + ":" + step + ":" + extent + target + cityFilter + salt + miniWarning;
         if (key.equals(miniKey)) return;
         miniKey = key;
-        miniMap.request(new SeedMap.Request(++miniRequest,Long.parseLong(seed),dimension,64,step,x - extent,z - extent,x + extent,z + extent,target,"any",salt,miniWarning.isEmpty(),miniWarning,false));
+        miniMap.request(new SeedMap.Request(++miniRequest,Long.parseLong(seed),dimension,64,step,x - extent,z - extent,x + extent,z + extent,target,cityFilter,salt,miniWarning.isEmpty(),miniWarning,true));
     }
     public boolean structureRecoveryRunning() { return recovery.running(); }
     public boolean recovering() { return anyRecoveryRunning(); }
@@ -179,6 +185,7 @@ public final class Workbench implements AutoCloseable {
         saveSession();
         session++;
         seedMap.reset(); miniMap.reset(); miniKey = "";
+        terrainMap.reset();
         connected = seedHash != null;
         hash = seedHash;
         trackedLocation = null;

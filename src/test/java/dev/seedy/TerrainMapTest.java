@@ -5,6 +5,18 @@ import org.junit.jupiter.api.Test;
 import static org.junit.jupiter.api.Assertions.*;
 
 class TerrainMapTest {
+    @Test void disconnectResetsTheTerrainStream() {
+        try (var map = new TerrainMap()) {
+            map.reset();
+            var first = com.google.gson.JsonParser.parseString(map.poll()).getAsJsonObject();
+            assertEquals("",first.get("dimension").getAsString());
+            map.reset();
+            var second = com.google.gson.JsonParser.parseString(map.poll()).getAsJsonObject();
+            assertTrue(second.get("reset").getAsLong() > first.get("reset").getAsLong());
+            assertNull(map.poll());
+        }
+    }
+
     @Test void terrainEncodingPreservesAllColumnsAndNegativeChunkCoordinates() {
         int[] colors = new int[256], heights = new int[256];
         for (int i = 0; i < colors.length; ++i) colors[i] = 0x306030 + i;

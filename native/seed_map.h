@@ -87,7 +87,7 @@ static void mapDecode(MapView &mapView, const Json &incoming) {
         const auto &runs = tile["runs"];
         for (size_t i = 0; i + 1 < runs.size(); i += 2) {
             int count = runs[i].get<int>(), value = runs[i+1].get<int>();
-            if (count <= 0 || offset + count > 1024 || value < 0 || value >= static_cast<int>(mapView.colors.size())) break;
+            if (count <= 0 || count > 1024 - offset || value < 0 || value >= static_cast<int>(mapView.colors.size())) break;
             std::fill_n(decoded.cells.begin() + offset, count, value);
             offset += count;
         }

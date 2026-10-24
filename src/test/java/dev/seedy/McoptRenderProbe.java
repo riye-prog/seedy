@@ -76,6 +76,7 @@ public final class McoptRenderProbe {
             String snapshot = new GsonBuilder().create().toJson(state);
             var inFlight = new ArrayDeque<Long>();
             var samples = new ArrayList<Long>();
+            var miniSamples = new ArrayList<Long>();
             var countData = arena.allocate(JAVA_INT,4);
             var output = new ArrayList<Map<String,Object>>();
             for (int pass = 0; pass < (arguments.length > 2 ? 4 : 3); pass++) {
@@ -88,6 +89,13 @@ public final class McoptRenderProbe {
                     for (int z = 5; z <= 8; ++z) for (int x = 7; x <= 10; ++x) data.invoke(null,2,terrainPacket(x,z));
                     position.invoke(null,128.0,96.0,45f);
                     var next = com.google.gson.JsonParser.parseString(snapshot).getAsJsonObject();
+                    if (arguments.length > 3) {
+                        var terrain = com.google.gson.JsonParser.parseString(Files.readString(Path.of(arguments[3]))).getAsJsonObject();
+                        data.invoke(null,2,"{\"reset\":1,\"dimension\":\"overworld\"}");
+                        for (var tile : terrain.getAsJsonArray("terrain")) data.invoke(null,2,tile.toString());
+                        for (String field : new String[]{"seed","x","y","z","biome"}) next.add(field,terrain.get(field));
+                        position.invoke(null,terrain.get("x").getAsDouble(),terrain.get("z").getAsDouble(),45f);
+                    }
                     next.addProperty("hudRevision",1); next.getAsJsonObject("uiSettings").addProperty("miniEnabled",true);
                     snapshot = next.toString();
                 }
@@ -102,6 +110,7 @@ public final class McoptRenderProbe {
                     Object action = frame.invoke(null,index == 0 ? snapshot : null,WIDTH,HEIGHT,1f,new double[0],McoptBridge.graphics(encoder,texture),lines,panel,hud);
                     if (hud && action != null) throw new IllegalStateException("Read-only HUD emitted an action: " + action);
                     if (pass == 0 && index > 10) samples.add(System.nanoTime() - started);
+                    if (minimap && index > 10) miniSamples.add(System.nanoTime() - started);
                     counters.invokeExact(countData.address());
                     if (countData.get(JAVA_INT,0) != 1) throw new IllegalStateException("Overlay created another command buffer");
                     readback.invokeExact(encoder,texture,0,0,0,WIDTH,HEIGHT,buffers[index % buffers.length],0L,WIDTH * 4);
@@ -112,6 +121,14 @@ public final class McoptRenderProbe {
                 byte[] image = MemorySegment.ofAddress(address).reinterpret(BYTES).toArray(JAVA_BYTE);
                 int changed = 0;
                 for (int index = 0; index < BYTES; index += 4) if (!Arrays.equals(image,index,index + 4,backdrop,index,index + 4)) changed++;
+                if (minimap) {
+                    int terrain = 0;
+                    for (int i = 0; i < BYTES; i += 4) {
+                        int blue = Byte.toUnsignedInt(image[i]), green = Byte.toUnsignedInt(image[i + 1]), red = Byte.toUnsignedInt(image[i + 2]);
+                        if (arguments.length > 3 ? green > red * 1.05 && green > blue * 1.1 && green > 35 : blue == 90 && green == 168 && red == 117) ++terrain;
+                    }
+                    if (terrain < 64) throw new IllegalStateException("Loaded terrain pixels were not sampled from the atlas");
+                }
                 if (changed < 1000) throw new IllegalStateException("Overlay pixels were not rendered");
                 for (int corner : new int[]{0,(WIDTH - 1) * 4,(HEIGHT - 1) * WIDTH * 4,BYTES - 4}) if (!Arrays.equals(image,corner,corner + 4,backdrop,corner,corner + 4)) throw new IllegalStateException("Overlay damaged pixels outside its geometry");
                 if (pass == 2) {
@@ -133,7 +150,9 @@ public final class McoptRenderProbe {
             release.invokeExact(background);
             for (long buffer : buffers) release.invokeExact(buffer);
             samples.sort(Long::compare);
-            var report = Map.of("mcopt", "0.3.0-alpha.2", "device",name.getString(0),"width",WIDTH,"height",HEIGHT,"in_flight",2,"jni_cpu_median_ms",samples.get(samples.size() / 2) / 1_000_000.0,"one_mcopt_command_buffer_per_frame",true,"frames",output,"scope","actual released mcopt native library and Seedy JNI renderer; no Minecraft instance launched; not an in-game FPS measurement");
+            miniSamples.sort(Long::compare);
+            var miniStats = miniSamples.isEmpty() ? Map.of() : Map.of("median",miniSamples.get(miniSamples.size() / 2) / 1_000_000.0,"p95",miniSamples.get((int)(miniSamples.size() * 0.95)) / 1_000_000.0);
+            var report = Map.of("mcopt", "0.3.0-alpha.2", "device",name.getString(0),"width",WIDTH,"height",HEIGHT,"in_flight",2,"jni_cpu_median_ms",samples.get(samples.size() / 2) / 1_000_000.0,"one_mcopt_command_buffer_per_frame",true,"frames",output,"minimap_jni_cpu_ms",miniStats,"scope","actual released mcopt native library and Seedy JNI renderer; no Minecraft instance launched; not an in-game FPS measurement");
             String json = new GsonBuilder().setPrettyPrinting().create().toJson(report);
             Files.writeString(Path.of(arguments[1] + ".json"),json + "\n");
             System.out.println(json);

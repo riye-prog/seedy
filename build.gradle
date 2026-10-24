@@ -40,7 +40,15 @@ tasks.register('mcoptRenderProbe', JavaExec) {
         classpath += files(project.property('mcoptJar'))
         args rootProject.file('native/dist/macos-universal/libseedy.dylib').absolutePath, project.findProperty('mcoptOutput') ?: '/tmp/seedy-mcopt-render'
         if (project.hasProperty('mapFixture')) args project.property('mapFixture')
+        if (project.hasProperty('terrainFixture')) args project.property('terrainFixture')
     }
+}
+tasks.register('savedTerrainProbe', JavaExec) {
+    dependsOn testClasses
+    classpath = sourceSets.test.runtimeClasspath
+    mainClass = 'dev.seedy.SavedTerrainProbe'
+    jvmArgs '-Djava.awt.headless=true'
+    doFirst { args project.property('terrainArgs').split(',') }
 }
 tasks.register('mcoptLoaderProbe', JavaExec) {
     dependsOn testClasses
