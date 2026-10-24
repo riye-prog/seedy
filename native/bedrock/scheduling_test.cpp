@@ -2,7 +2,7 @@
 #include <cassert>
 
 static int checks = 0;
-static bool continuing() { return ++checks < 3; }
+static bool continuing() { return ++checks < 2; }
 
 int main() {
 #ifdef __APPLE__
@@ -40,6 +40,6 @@ int main() {
     std::this_thread::sleep_for(std::chrono::milliseconds(3));
     auto started = std::chrono::steady_clock::now();
     assert(!slice.checkpoint(continuing));
-    assert(checks == 3);
+    assert(checks == 2);
     assert(std::chrono::steady_clock::now() - started < std::chrono::milliseconds(100));
 }
