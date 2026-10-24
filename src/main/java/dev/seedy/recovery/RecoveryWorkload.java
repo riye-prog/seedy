@@ -14,6 +14,7 @@ public final class RecoveryWorkload {
     public static int workersFor(int processors) { return Math.clamp(processors - 2,1,6); }
     public static int dutyPercent() { return BUDGET.dutyPercent(System.nanoTime()); }
     public static void active(boolean value) { BUDGET.active(value); }
+    public static void frameLimit(int framesPerSecond) { BUDGET.frameLimit(framesPerSecond); }
     public static void frameStarted() { frameStarted = System.nanoTime(); }
     public static void frameFinished() {
         long now = System.nanoTime();

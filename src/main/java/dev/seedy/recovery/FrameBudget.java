@@ -4,8 +4,17 @@ public final class FrameBudget {
     private volatile boolean active;
     private volatile long lastFrame;
     private volatile int pressure;
+    private volatile long frameLimitPeriod;
     private double baseline;
     private int healthyFrames;
+
+    public void frameLimit(int framesPerSecond) {
+        long period = framesPerSecond <= 0 ? 0 : 1_000_000_000L / framesPerSecond;
+        if (period == frameLimitPeriod) return;
+        frameLimitPeriod = period;
+        pressure = 0;
+        healthyFrames = 0;
+    }
 
     public void active(boolean value) {
         if (active == value) return;
@@ -24,7 +33,8 @@ public final class FrameBudget {
             return;
         }
         if (baseline == 0) baseline = Math.clamp(period,500_000L,250_000_000L);
-        if (period > Math.max(baseline * 1.3,baseline + 1_500_000)) {
+        double expected = Math.max(baseline,frameLimitPeriod);
+        if (period > Math.max(expected * 1.3,expected + 1_500_000)) {
             pressure = Math.min(8,pressure + 1);
             healthyFrames = 0;
         } else if (++healthyFrames >= 12) {

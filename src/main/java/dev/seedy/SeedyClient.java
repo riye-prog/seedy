@@ -69,6 +69,8 @@ public final class SeedyClient implements ClientModInitializer {
             Workbench.INSTANCE.tick(client);
             BedrockRecovery.INSTANCE.tick(client);
             NetherBedrockRecovery.INSTANCE.tick(client);
+            int frameLimit = client.getFramerateLimitTracker().getFramerateLimit();
+            dev.seedy.recovery.RecoveryWorkload.frameLimit(frameLimit >= net.minecraft.client.Options.UNLIMITED_FRAMERATE_CUTOFF ? 0 : frameLimit);
             dev.seedy.recovery.RecoveryWorkload.active(Workbench.INSTANCE.recovering());
             BedrockRecovery.updateWorkBudget();
             NetherBedrockRecovery.updateWorkBudget();

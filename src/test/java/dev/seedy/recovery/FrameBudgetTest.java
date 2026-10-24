@@ -60,4 +60,22 @@ class FrameBudgetTest {
         for (int i = 0; i < 64; i++) budget.frame(3_000_000,now += 100_000_000);
         assertEquals(100,budget.dutyPercent(now));
     }
+
+    @Test void changingTheFrameLimitDuringRecoveryDoesNotLookLikeContention() {
+        var budget = new FrameBudget();
+        long now = 1_000_000_000L;
+        budget.frameLimit(120);
+        for (int i = 0; i < 128; i++) budget.frame(2_000_000,now += 8_333_333);
+        budget.active(true);
+        for (int i = 0; i < 6; i++) budget.frame(2_000_000,now += 15_000_000);
+        assertEquals(35,budget.dutyPercent(now));
+        budget.frameLimit(10);
+        for (int i = 0; i < 24; i++) budget.frame(2_000_000,now += 100_000_000);
+        assertEquals(100,budget.dutyPercent(now));
+        budget.frameLimit(120);
+        for (int i = 0; i < 24; i++) budget.frame(2_000_000,now += 8_333_333);
+        assertEquals(100,budget.dutyPercent(now));
+        for (int i = 0; i < 6; i++) budget.frame(2_000_000,now += 15_000_000);
+        assertEquals(35,budget.dutyPercent(now));
+    }
 }
