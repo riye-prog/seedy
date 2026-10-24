@@ -745,14 +745,27 @@ static Json drawPanel(int width, int height) {
     return command;
 }
 
+static bool panelWasVisible = false;
+
+static Json drawOverlayFrame(int width, int height, bool panel, bool hud) {
+    loadPreferences();
+    Json command = panel ? drawPanel(width,height) : Json::object();
+    if (hud || panel && hudEditing) drawGameplayHud(width,height,panel && hudEditing);
+    if (!panel && panelWasVisible && preferencesLoaded) persistPreferences(command,true);
+    panelWasVisible = panel;
+    return command;
+}
+
 #ifndef SEEDY_HEADLESS_TEST
 extern "C" JNIEXPORT jstring JNICALL Java_dev_seedy_NativeGui_frame(JNIEnv *env, jclass type, jstring snapshot, jint width, jint height, jfloat density, jdoubleArray events, jlongArray graphics, jdoubleArray outlineLines, jboolean panel, jboolean hud) {
     try {
         frameEnvironment = env;
         if (!context) initialize(env, type, density);
         ImGui::SetCurrentContext(context);
-        std::string incoming = javaString(env, snapshot);
-        if (incoming != previousState) { state = Json::parse(incoming); previousState = incoming; }
+        if (snapshot) {
+            std::string incoming = javaString(env, snapshot);
+            if (incoming != previousState) { state = Json::parse(incoming); previousState = std::move(incoming); }
+        }
         auto &io = ImGui::GetIO();
         io.DisplaySize = {static_cast<float>(width), static_cast<float>(height)};
         auto now = std::chrono::steady_clock::now();
@@ -760,7 +773,7 @@ extern "C" JNIEXPORT jstring JNICALL Java_dev_seedy_NativeGui_frame(JNIEnv *env,
         previousFrame = now;
         int count = env->GetArrayLength(events);
         std::vector<double> input(count);
-        env->GetDoubleArrayRegion(events, 0, count, input.data());
+        if (count) env->GetDoubleArrayRegion(events, 0, count, input.data());
         const ImGuiKey keys[] = {ImGuiKey_None,ImGuiKey_Tab,ImGuiKey_LeftArrow,ImGuiKey_RightArrow,ImGuiKey_UpArrow,ImGuiKey_DownArrow,ImGuiKey_Backspace,ImGuiKey_Delete,ImGuiKey_Enter,ImGuiKey_Home,ImGuiKey_End,ImGuiMod_Ctrl,ImGuiMod_Shift,ImGuiKey_A,ImGuiKey_C,ImGuiKey_V,ImGuiKey_X,ImGuiKey_Z,ImGuiMod_Super,ImGuiMod_Alt,ImGuiKey_Y};
         for (int i = 0; i + 3 < count; i += 4) {
             int kind = static_cast<int>(input[i]);
@@ -771,23 +784,20 @@ extern "C" JNIEXPORT jstring JNICALL Java_dev_seedy_NativeGui_frame(JNIEnv *env,
             if (kind == 4) io.AddInputCharacter(static_cast<unsigned int>(input[i+1]));
             if (kind == 5) { io.AddFocusEvent(input[i+1] != 0); mapView.sentKey.clear(); }
         }
-        jlong handles[9];
-        if (env->GetArrayLength(graphics) != 9) throw std::runtime_error("Invalid Vulkan context");
-        env->GetLongArrayRegion(graphics, 0, 9, handles);
+        jlong handles[10];
+        if (env->GetArrayLength(graphics) != 10) throw std::runtime_error("Invalid Vulkan context");
+        env->GetLongArrayRegion(graphics, 0, 10, handles);
         VulkanRenderer::prepare(handles);
         ImGui_ImplVulkan_NewFrame();
         ImGui::NewFrame();
         int lineCount = env->GetArrayLength(outlineLines);
         std::vector<double> lines(lineCount);
-        env->GetDoubleArrayRegion(outlineLines, 0, lineCount, lines.data());
+        if (lineCount) env->GetDoubleArrayRegion(outlineLines, 0, lineCount, lines.data());
         drawOutlines(lines);
-        loadPreferences();
-        Json command = panel ? drawPanel(width, height) : Json::object();
-        if (hud || panel && hudEditing) drawGameplayHud(width, height, panel && hudEditing);
-        if (!panel && preferencesLoaded) persistPreferences(command,true);
+        Json command = drawOverlayFrame(width,height,panel,hud);
         ImGui::Render();
         VulkanRenderer::render(ImGui::GetDrawData(), handles, width, height);
-        return env->NewStringUTF(command.empty() ? "" : command.dump().c_str());
+        return command.empty() ? nullptr : env->NewStringUTF(command.dump().c_str());
     } catch (const std::exception &e) {
         env->ThrowNew(env->FindClass("java/lang/IllegalStateException"), e.what());
         return nullptr;

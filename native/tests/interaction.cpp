@@ -3,6 +3,7 @@
 #include <iostream>
 #include <fstream>
 #include "../overlay.cpp"
+#include "../draw_region.h"
 
 static std::map<ImGuiID, ImRect> bounds;
 static std::map<std::string, ImGuiID> labels;
@@ -321,9 +322,19 @@ int main(int argc, char **argv) {
         io.AddMousePosEvent(hud->Pos.x + 40,hud->Pos.y + 40); hudFrame(false); hudFrame(false);
         require(!io.WantCaptureMouse && !io.WantCaptureKeyboard,"Gameplay overlay prevented normal game input");
         require(hud->Pos.x >= 0 && hud->Pos.x + hud->Size.x <= 1440,"Gameplay overlay exceeded the screen bounds");
+        auto area = drawRegion(ImGui::GetDrawData(),1440,1000);
+        require(area.width > 0 && area.height > 0 && area.width * area.height < 1440 * 1000 / 8,"Small HUD requested full-screen GPU rendering");
+        auto original = ImGui::GetDrawData()->CmdLists[0]->VtxBuffer[0].pos;
+        flipDrawData(ImGui::GetDrawData(),1000); flipDrawData(ImGui::GetDrawData(),1000);
+        auto restored = ImGui::GetDrawData()->CmdLists[0]->VtxBuffer[0].pos;
+        require(std::abs(original.y - restored.y) < 0.001f,"Vulkan coordinate conversion damaged cached HUD geometry");
         auto hudStart = std::chrono::steady_clock::now();
-        for (int index = 0; index < 300; index++) hudFrame(false);
-        std::cout << "Gameplay HUD CPU frame ms: " << std::chrono::duration<double,std::milli>(std::chrono::steady_clock::now() - hudStart).count() / 300 << '\n';
+        for (int index = 0; index < 1000; index++) { hudFrame(false); Json command = Json::object(); persistPreferences(command,true); }
+        double legacyHudMs = std::chrono::duration<double,std::milli>(std::chrono::steady_clock::now() - hudStart).count() / 1000;
+        hudStart = std::chrono::steady_clock::now();
+        for (int index = 0; index < 1000; index++) { ImGui::NewFrame(); auto command = drawOverlayFrame(1440,1000,false,true); require(command.empty(),"Read-only HUD sent a settings update"); ImGui::Render(); }
+        std::cout << "Legacy HUD with settings serialization CPU frame ms: " << legacyHudMs << '\n';
+        std::cout << "Gameplay HUD complete UI CPU frame ms: " << std::chrono::duration<double,std::milli>(std::chrono::steady_clock::now() - hudStart).count() / 1000 << '\n';
         exportFrame("/tmp/seedy-gameplay-hud.json");
         hudFrame(true); hudFrame(true);
         auto hudHandle = bounds.at(labels.at("Move gameplay overlay")).GetCenter();

@@ -13,36 +13,44 @@ final class ObservationCollector {
     private final ArrayDeque<ChunkPos> queue = new ArrayDeque<>();
     private final Set<ChunkPos> queued = new HashSet<>();
     private final Set<ChunkPos> loaded = new HashSet<>();
+    private final ArrayDeque<ChunkPos> templateQueue = new ArrayDeque<>();
+    private final Set<ChunkPos> templateQueued = new HashSet<>();
     private TemplateSignatures signatures;
     private ClientLevel level;
     private static final int[][] HUT = {{3,2,6},{4,2,6},{1,3,5},{1,2,1},{5,2,1},{2,3,2},{3,3,7}};
     private static final Block[] HUT_BLOCKS = {Blocks.CRAFTING_TABLE, Blocks.CAULDRON, Blocks.POTTED_RED_MUSHROOM, Blocks.OAK_FENCE, Blocks.OAK_FENCE, Blocks.OAK_FENCE, Blocks.OAK_FENCE};
     void initialize() { signatures = new TemplateSignatures(); }
-    void clear() { queue.clear(); queued.clear(); loaded.clear(); level = null; }
-    int pending() { return queue.size(); }
-    void unload(ChunkPos position) { loaded.remove(position); queued.remove(position); queue.remove(position); }
+    void clear() { queue.clear(); queued.clear(); templateQueue.clear(); templateQueued.clear(); loaded.clear(); level = null; }
+    int pending() { return queue.size() + templateQueued.size(); }
+    void unload(ChunkPos position) { loaded.remove(position); queued.remove(position); queue.remove(position); templateQueued.remove(position); templateQueue.remove(position); }
     void rescan() { for (var position : loaded) schedule(position); }
     void loaded(ClientLevel world, ChunkPos position, Workbench workbench) {
         if (world != level) { clear(); level = world; }
         loaded.add(position);
         if (!workbench.collecting()) return;
-        scan(world, position, workbench);
+        schedule(position);
         for (int dx = -2; dx <= 2; dx++) for (int dz = -2; dz <= 2; dz++) {
             if (dx == 0 && dz == 0) continue;
             var neighbor = new ChunkPos(position.x() + dx, position.z() + dz);
-            if (loaded.contains(neighbor)) scanTemplates(world, neighbor, workbench);
+            if (loaded.contains(neighbor) && !queued.contains(neighbor) && templateQueue.size() < 4096 && templateQueued.add(neighbor)) templateQueue.add(neighbor);
         }
         workbench.refresh();
     }
     private void schedule(ChunkPos position) { if (queue.size() < 4096 && queued.add(position)) queue.add(position); }
     void tick(ClientLevel world, Workbench workbench) {
-        if (queue.isEmpty() || !workbench.collecting() || !world.dimension().identifier().getPath().equals("overworld")) return;
-        long deadline = System.nanoTime() + 6_000_000;
+        if (queue.isEmpty() && templateQueue.isEmpty() || !workbench.collecting() || !world.dimension().identifier().getPath().equals("overworld")) return;
+        long deadline = System.nanoTime() + 2_000_000;
         do {
-            var chunk = queue.remove();
-            queued.remove(chunk);
-            if (loaded.contains(chunk)) scan(world, chunk, workbench);
-        } while (!queue.isEmpty() && System.nanoTime() < deadline);
+            if (!queue.isEmpty()) {
+                var chunk = queue.remove();
+                queued.remove(chunk);
+                templateQueued.remove(chunk);
+                if (loaded.contains(chunk)) scan(world, chunk, workbench);
+            } else {
+                var chunk = templateQueue.remove();
+                if (templateQueued.remove(chunk) && loaded.contains(chunk)) scanTemplates(world, chunk, workbench);
+            }
+        } while ((!queue.isEmpty() || !templateQueue.isEmpty()) && System.nanoTime() < deadline);
         workbench.refresh();
     }
     private void scanTemplates(ClientLevel world, ChunkPos chunk, Workbench workbench) {

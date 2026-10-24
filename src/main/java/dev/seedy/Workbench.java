@@ -60,6 +60,8 @@ public final class Workbench implements AutoCloseable {
     private volatile String error = "";
     private volatile String snapshot = "{}";
     private volatile String hudSnapshot = "{}";
+    private boolean snapshotDirty = true;
+    private long panelSnapshotAt;
     private Long hash;
     private String seed;
     private volatile boolean verified;
@@ -102,9 +104,16 @@ public final class Workbench implements AutoCloseable {
         publish(Minecraft.getInstance());
     }
     public boolean structureRecoveryRunning() { return recovery.running(); }
-    public String snapshot() { return snapshot; }
+    public String snapshot() {
+        long now = System.nanoTime();
+        if (snapshotDirty && (panelSnapshotAt == 0 || now - panelSnapshotAt >= 100_000_000L)) {
+            var client = Minecraft.getInstance();
+            publishPanel(client, hudState(client));
+        }
+        return snapshot;
+    }
     public String hudSnapshot() { return hudSnapshot; }
-    public void refresh() { publish(Minecraft.getInstance()); }
+    public void refresh() { snapshotDirty = true; }
     public void stopMap() { mapVisible = false; seedMap.stop(); }
 
     public void session(Long seedHash) {
@@ -169,7 +178,10 @@ public final class Workbench implements AutoCloseable {
 
     public void tick(Minecraft client) {
         if (catalog == null) return;
-        if (++ticks % 5 == 0) publish(client);
+        if (++ticks % 5 == 0) {
+            if (hudEnabled() || client.gui.screen() instanceof OverlayScreen) publish(client);
+            else snapshotDirty = true;
+        }
         if (ticks % 100 == 0) saveSession();
     }
 
@@ -461,7 +473,7 @@ public final class Workbench implements AutoCloseable {
         } catch (Exception e) { storageStatus = "Could not save progress"; }
     }
 
-    private void publish(Minecraft client) {
+    private JsonObject hudState(Minecraft client) {
         var state = new JsonObject();
         state.addProperty("seed", seed == null ? "" : seed);
         state.add("uiSettings", uiSettings);
@@ -481,6 +493,42 @@ public final class Workbench implements AutoCloseable {
                 var target = new JsonObject(); target.addProperty("name",result.name()); target.addProperty("x",result.x()); target.addProperty("z",result.z()); target.addProperty("dimension",result.dimension()); state.add("waypoint",target);
             });
         }
+        state.addProperty("connected", connected);
+        state.addProperty("verified", verified);
+        state.addProperty("recovering", recovery.running());
+        state.addProperty("recoveryStatus", recovery.stage());
+        state.addProperty("progress", recovery.progress());
+        state.addProperty("paperRunning", paperRecovery.running());
+        state.addProperty("paperStatus", paperRecovery.status());
+        state.addProperty("paperProgress", paperRecovery.progress());
+        var block = BedrockRecovery.INSTANCE;
+        var progress = block.searchProgress();
+        state.addProperty("patternRunning", block.running());
+        state.addProperty("patternStatus", block.status());
+        state.addProperty("patternProgress", progress.fraction());
+        state.addProperty("patternElapsedSeconds", progress.elapsedSeconds());
+        state.addProperty("patternEvidenceChunks", block.evidenceChunks());
+        state.addProperty("patternRawBlocks", block.rawBlocks());
+        var nether = NetherBedrockRecovery.INSTANCE;
+        state.addProperty("netherPatternRunning", nether.running());
+        state.addProperty("netherPatternStatus", nether.status());
+        state.addProperty("netherPatternProgress", nether.progress());
+        state.addProperty("searchStatus", searchStatus);
+        state.addProperty("dimension", client.level == null ? "overworld" : client.level.dimension().identifier().getPath());
+        state.addProperty("x", client.player == null ? 0 : client.player.getBlockX());
+        state.addProperty("y", client.player == null ? 64 : client.player.getBlockY());
+        state.addProperty("z", client.player == null ? 0 : client.player.getBlockZ());
+        return state;
+    }
+
+    private void publish(Minecraft client) {
+        var hud = hudState(client);
+        hudSnapshot = JSON.toJson(hud);
+        snapshotDirty = true;
+        if (client.gui.screen() instanceof OverlayScreen) publishPanel(client, hud);
+    }
+
+    private void publishPanel(Minecraft client, JsonObject state) {
         state.addProperty("verified", verified);
         state.addProperty("connected", connected);
         state.addProperty("collecting", collecting);
@@ -593,12 +641,9 @@ public final class Workbench implements AutoCloseable {
         state.add("structures", JSON.toJsonTree(catalog == null ? List.of() : catalog.structures()));
         state.add("biomes", JSON.toJsonTree(catalog == null ? List.of() : catalog.biomes()));
         state.add("recoveryTypes", JSON.toJsonTree(rules.keySet().stream().sorted().toList()));
-        var hud = new JsonObject();
-        for (String key : new String[]{"connected","seed","verified","uiSettings","hudRevision","x","y","z","yaw","biome","dimension","fps","waypoint","recovering","recoveryStatus","progress","patternRunning","patternStatus","patternProgress","patternElapsedSeconds","patternEvidenceChunks","patternRawBlocks","netherPatternRunning","netherPatternStatus","netherPatternProgress","paperRunning","paperStatus","paperProgress","searchStatus","searchChecked"}) {
-            if (state.has(key)) hud.add(key,state.get(key));
-        }
-        hudSnapshot = JSON.toJson(hud);
         snapshot = JSON.toJson(state);
+        snapshotDirty = false;
+        panelSnapshotAt = System.nanoTime();
     }
 
     @Override public void close() { saveSession(); recovery.close(); paperRecovery.close(); seedMap.close(); cancelSearch(); if (locator != null) searches.submit(locator::close); searches.shutdown(); }

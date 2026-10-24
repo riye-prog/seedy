@@ -30,6 +30,9 @@ public final class NativeGui {
         loaded = true;
     }
 
+    private static final double[] NO_INPUT = new double[0];
+    private static String sentSnapshot;
+
     public static boolean wantsFrame() {
         return !failed && (Minecraft.getInstance().gui.screen() instanceof OverlayScreen || hudVisible() || LoadedObjects.active() || loaded && !INPUT.isEmpty());
     }
@@ -53,12 +56,17 @@ public final class NativeGui {
             var window = client.getWindow();
             boolean panel = client.gui.screen() instanceof OverlayScreen;
             if (panel) event(0, OverlayScreen.framebufferCoordinate(client.mouseHandler.xpos(), width, window.getScreenWidth()), OverlayScreen.framebufferCoordinate(client.mouseHandler.ypos(), height, window.getScreenHeight()), 0);
-            var events = new ArrayList<double[]>();
-            double[] event;
-            while ((event = INPUT.poll()) != null) events.add(event);
-            double[] packed = new double[events.size() * 4];
-            for (int i = 0; i < events.size(); i++) System.arraycopy(events.get(i), 0, packed, i * 4, 4);
-            String action = frame(panel ? Workbench.INSTANCE.snapshot() : Workbench.INSTANCE.hudSnapshot(), width, height, (float)width / Math.max(1, window.getScreenWidth()), packed, graphics, OutlineProjection.frame(width, height), panel, hudVisible());
+            double[] packed = NO_INPUT;
+            if (!INPUT.isEmpty()) {
+                var events = new ArrayList<double[]>();
+                double[] event;
+                while ((event = INPUT.poll()) != null) events.add(event);
+                packed = new double[events.size() * 4];
+                for (int i = 0; i < events.size(); i++) System.arraycopy(events.get(i), 0, packed, i * 4, 4);
+            }
+            String snapshot = panel ? Workbench.INSTANCE.snapshot() : Workbench.INSTANCE.hudSnapshot();
+            String action = frame(snapshot == sentSnapshot ? null : snapshot, width, height, (float)width / Math.max(1, window.getScreenWidth()), packed, graphics, OutlineProjection.frame(width, height), panel, hudVisible());
+            sentSnapshot = snapshot;
             if (!rendered) {
                 rendered = true;
                 org.slf4j.LoggerFactory.getLogger("Seedy").info("Dear ImGui Vulkan overlay rendered inside Minecraft");
@@ -79,5 +87,5 @@ public final class NativeGui {
 
     public static String readClipboard() { return Minecraft.getInstance().keyboardHandler.getClipboard(); }
     public static void writeClipboard(String value) { Minecraft.getInstance().keyboardHandler.setClipboard(value); }
-    public static void shutdown() { if (loaded) dispose(); }
+    public static void shutdown() { sentSnapshot = null; if (loaded) dispose(); }
 }
