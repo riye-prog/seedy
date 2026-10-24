@@ -2,6 +2,9 @@
 #include <imgui.h>
 #ifndef SEEDY_HEADLESS_TEST
 #include "vulkan_renderer.h"
+#ifdef __APPLE__
+#include "metal_renderer.h"
+#endif
 #endif
 #include <nlohmann/json.hpp>
 #include <algorithm>
@@ -784,11 +787,24 @@ extern "C" JNIEXPORT jstring JNICALL Java_dev_seedy_NativeGui_frame(JNIEnv *env,
             if (kind == 4) io.AddInputCharacter(static_cast<unsigned int>(input[i+1]));
             if (kind == 5) { io.AddFocusEvent(input[i+1] != 0); mapView.sentKey.clear(); }
         }
-        jlong handles[10];
-        if (env->GetArrayLength(graphics) != 10) throw std::runtime_error("Invalid Vulkan context");
-        env->GetLongArrayRegion(graphics, 0, 10, handles);
-        VulkanRenderer::prepare(handles);
-        ImGui_ImplVulkan_NewFrame();
+        jlong handles[10]{};
+        int handleCount = env->GetArrayLength(graphics);
+        if (handleCount != 10 && handleCount != 3) throw std::runtime_error("Invalid renderer context");
+        env->GetLongArrayRegion(graphics, 0, handleCount, handles);
+        if (handleCount == 3) {
+#ifdef __APPLE__
+            VulkanRenderer::shutdown();
+            MetalRenderer::prepare(handles);
+#else
+            throw std::runtime_error("The mcopt Metal overlay requires macOS");
+#endif
+        } else {
+#ifdef __APPLE__
+            MetalRenderer::shutdown();
+#endif
+            VulkanRenderer::prepare(handles);
+            ImGui_ImplVulkan_NewFrame();
+        }
         ImGui::NewFrame();
         int lineCount = env->GetArrayLength(outlineLines);
         std::vector<double> lines(lineCount);
@@ -796,7 +812,11 @@ extern "C" JNIEXPORT jstring JNICALL Java_dev_seedy_NativeGui_frame(JNIEnv *env,
         drawOutlines(lines);
         Json command = drawOverlayFrame(width,height,panel,hud);
         ImGui::Render();
-        VulkanRenderer::render(ImGui::GetDrawData(), handles, width, height);
+        if (handleCount == 3) {
+#ifdef __APPLE__
+            MetalRenderer::render(ImGui::GetDrawData(),width,height);
+#endif
+        } else VulkanRenderer::render(ImGui::GetDrawData(), handles, width, height);
         return command.empty() ? nullptr : env->NewStringUTF(command.dump().c_str());
     } catch (const std::exception &e) {
         env->ThrowNew(env->FindClass("java/lang/IllegalStateException"), e.what());
@@ -808,6 +828,9 @@ extern "C" JNIEXPORT void JNICALL Java_dev_seedy_NativeGui_dispose(JNIEnv *env, 
     if (!context) return;
     ImGui::SetCurrentContext(context);
     VulkanRenderer::shutdown();
+#ifdef __APPLE__
+    MetalRenderer::shutdown();
+#endif
     ImGui::DestroyContext(context);
     context = nullptr;
     if (bridgeClass) env->DeleteGlobalRef(bridgeClass);

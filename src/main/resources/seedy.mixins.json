@@ -1,7 +1,8 @@
 {
   "required": true,
   "package": "dev.seedy.mixin",
+  "plugin": "dev.seedy.mixin.SeedyMixinPlugin",
   "compatibilityLevel": "JAVA_25",
-  "client": ["PresentMixin", "VulkanSurfaceMixin", "VulkanEncoderAccessor", "VulkanDeviceMixin", "ConnectionMixin", "ChunkBlocksMixin", "StrongholdMixin", "EndCityMixin"],
+  "client": ["PresentMixin", "VulkanSurfaceMixin", "VulkanEncoderAccessor", "VulkanDeviceMixin", "McoptDeviceMixin", "McoptEncoderMixin", "McoptTextureAccess", "ConnectionMixin", "ChunkBlocksMixin", "StrongholdMixin", "EndCityMixin"],
   "injectors": { "defaultRequire": 1 }
 }

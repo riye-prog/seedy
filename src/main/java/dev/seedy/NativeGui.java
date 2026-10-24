@@ -11,7 +11,7 @@ public final class NativeGui {
     private static boolean loaded;
     private static boolean failed;
     private static boolean rendered;
-    private static boolean vulkanSeen;
+    private static boolean rendererSeen;
     private static native String frame(String state, int width, int height, float density, double[] events, long[] graphics, double[] lines, boolean panel, boolean hud);
     private static native void dispose();
 
@@ -42,10 +42,11 @@ public final class NativeGui {
         return client.level != null && client.gui.screen() == null && !client.gui.hud.isHidden() && Workbench.INSTANCE.hudEnabled();
     }
 
-    public static void vulkanAvailable() { vulkanSeen = true; }
+    public static void vulkanAvailable() { rendererSeen = true; }
+    public static void metalAvailable() { rendererSeen = true; }
 
     public static void checkBackend() {
-        if (!vulkanSeen && !failed && (Minecraft.getInstance().gui.screen() instanceof OverlayScreen || hudVisible())) fail(new IllegalStateException("Select Vulkan in Minecraft's video settings and restart the game to use Seedy's panel."));
+        if (!rendererSeen && !failed && (Minecraft.getInstance().gui.screen() instanceof OverlayScreen || hudVisible())) fail(new IllegalStateException("Use Vulkan or mcopt's Metal renderer and restart the game to use Seedy's panel."));
     }
 
     public static void render(long[] graphics, int width, int height) {
@@ -69,13 +70,13 @@ public final class NativeGui {
             sentSnapshot = snapshot;
             if (!rendered) {
                 rendered = true;
-                org.slf4j.LoggerFactory.getLogger("Seedy").info("Dear ImGui Vulkan overlay rendered inside Minecraft");
+                org.slf4j.LoggerFactory.getLogger("Seedy").info("Dear ImGui {} overlay rendered inside Minecraft",graphics.length == 3 ? "mcopt Metal" : "Vulkan");
             }
             if (action != null && !action.isEmpty()) client.execute(() -> Workbench.INSTANCE.action(action));
         } catch (Exception | LinkageError e) { fail(e); }
     }
 
-    private static void fail(Throwable error) {
+    public static void fail(Throwable error) {
         failed = true;
         var client = Minecraft.getInstance();
         client.execute(() -> {

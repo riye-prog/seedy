@@ -1,5 +1,5 @@
 plugins { id 'net.fabricmc.fabric-loom' version '1.17.21' }
-version = "0.9.18+${project.name}"
+version = "0.9.19+${project.name}"
 group = 'dev.seedy'
 base.archivesName = 'seedy'
 repositories { mavenCentral() }
@@ -15,16 +15,51 @@ loom {
 sourceSets.main.java.srcDir rootProject.file("src/compat/${project.name}")
 sourceSets.test.java.srcDir rootProject.file("src/test/compat/${project.name}")
 sourceSets.main.java.srcDir rootProject.file('vendor/bedrockseed/src/main/java/bedrock/generated')
+configurations { mcoptLoaderProbeRuntime }
 dependencies {
     minecraft "com.mojang:minecraft:${project.name}"
     implementation 'net.fabricmc:fabric-loader:0.19.3'
     implementation "net.fabricmc.fabric-api:fabric-api:0.161.0+${project.name}"
     testImplementation 'org.junit.jupiter:junit-jupiter:5.13.4'
     testRuntimeOnly 'org.junit.platform:junit-platform-launcher'
+    mcoptLoaderProbeRuntime 'net.fabricmc:fabric-loader:0.19.5'
 }
 tasks.withType(JavaCompile).configureEach { options.release = 25 }
 java { toolchain.languageVersion = JavaLanguageVersion.of(25) }
-test { useJUnitPlatform() }
+test {
+    useJUnitPlatform()
+    if (project.hasProperty('mcoptJar')) systemProperty 'seedy.mcoptJar', file(project.property('mcoptJar')).absolutePath
+}
+tasks.register('mcoptRenderProbe', JavaExec) {
+    dependsOn testClasses
+    classpath = sourceSets.test.runtimeClasspath
+    mainClass = 'dev.seedy.McoptRenderProbe'
+    jvmArgs '--enable-native-access=ALL-UNNAMED'
+    doFirst {
+        if (!project.hasProperty('mcoptJar')) throw new GradleException('Pass -PmcoptJar=/absolute/path/to/mcopt.jar')
+        classpath += files(project.property('mcoptJar'))
+        args rootProject.file('native/dist/macos-universal/libseedy.dylib').absolutePath, project.findProperty('mcoptOutput') ?: '/tmp/seedy-mcopt-render'
+    }
+}
+tasks.register('mcoptLoaderProbe', JavaExec) {
+    dependsOn testClasses
+    classpath = sourceSets.test.runtimeClasspath.filter { !it.name.startsWith('fabric-loader-') } + configurations.mcoptLoaderProbeRuntime
+    mainClass = 'dev.seedy.McoptLoaderProbe'
+    jvmArgs '--enable-native-access=ALL-UNNAMED'
+    systemProperty 'fabric.development', 'true'
+    systemProperty 'fabric.classPathGroups', sourceSets.main.output.files.collect { it.absolutePath }.join(File.pathSeparator)
+    systemProperty 'mcopt.preload', 'false'
+    systemProperty 'mcopt.profile', 'none'
+    doFirst {
+        boolean mcopt = project.hasProperty('mcoptJar')
+        if (mcopt) classpath += files(project.property('mcoptJar'))
+        systemProperty 'seedy.expectMcopt', mcopt.toString()
+        def probeRoot = rootProject.layout.buildDirectory.dir("mcopt-loader-${project.name}-${mcopt}").get().asFile
+        probeRoot.mkdirs()
+        workingDir probeRoot
+        args probeRoot.absolutePath, project.name, new File(probeRoot, 'result.json').absolutePath
+    }
+}
 tasks.register('recoveryReplay', JavaExec) {
     dependsOn testClasses
     classpath = sourceSets.test.runtimeClasspath
