@@ -389,6 +389,14 @@ int main(int argc, char **argv) {
         preferences.hudEnabled = false; hudFrame(false);
         require(ImGui::GetDrawData()->TotalVtxCount == 0,"Disabled gameplay overlay was still drawn");
         testMapCaching();
+        ImGui::NewFrame();
+        auto clipped = ImGui::GetForegroundDrawList();
+        clipped->PushClipRect({100,100},{200,200});
+        clipped->AddRectFilled({-1000,-1000},{2000,2000},IM_COL32_WHITE);
+        clipped->PopClipRect();
+        ImGui::Render();
+        auto clippedRegion = drawRegion(ImGui::GetDrawData(),1440,1000);
+        require(clippedRegion.width == 102 && clippedRegion.height == 102,"Clipped map tiles expanded the GPU rendering area");
         if (argc == 3) {
             Json preview; std::ifstream(argv[1]) >> preview;
             mapView = MapView{};

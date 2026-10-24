@@ -536,6 +536,8 @@ public final class Workbench implements AutoCloseable {
     private JsonObject hudState(Minecraft client) {
         var state = new JsonObject();
         state.addProperty("seed", seed == null ? "" : seed);
+        state.addProperty("gameVersion",gameVersion);
+        state.addProperty("generationVersion",generationVersion);
         state.add("uiSettings", uiSettings);
         state.addProperty("minimapWarning",miniWarning);
         state.addProperty("hudRevision", hudRevision);

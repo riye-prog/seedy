@@ -120,7 +120,7 @@ static void drawMinimap(int width, int height) {
     draw->AddCircleFilled(center,7 * scale,IM_COL32(10,14,19,220),16);
     draw->AddTriangleFilled(front,{center.x + delta.y * 0.45f - delta.x * 0.35f,center.y - delta.x * 0.45f - delta.y * 0.35f},{center.x - delta.y * 0.45f - delta.x * 0.35f,center.y + delta.x * 0.45f - delta.y * 0.35f},IM_COL32(237,246,244,255));
     auto north = point(liveMapX,liveMapZ - zoom * (size / 2 - 12 * scale)); draw->AddText({north.x - 4 * scale,north.y - 7 * scale},IM_COL32(246,249,247,255),"N");
-    if (!predicted && !rendered) draw->AddText({start.x + 12 * scale,end.y - 24 * scale},IM_COL32(190,199,211,255),preferences.miniMode == 2 ? "Recover or enter a seed" : "Waiting for loaded terrain");
+    if (!predicted && !rendered) draw->AddText({start.x + 12 * scale,end.y - 24 * scale},IM_COL32(190,199,211,255),preferences.miniMode == 2 ? (state.value("minimapWarning","").empty() ? "Recover or enter a seed" : "Seed layer unavailable") : "Waiting for loaded terrain");
     draw->PopClipRect();
     ImGui::SetCursorScreenPos({start.x,end.y + 7 * scale}); ImGui::Text("%d  /  %d",int(std::floor(liveMapX)),int(std::floor(liveMapZ)));
     char range[32]; std::snprintf(range,sizeof(range),"%d blocks",int(size * zoom));

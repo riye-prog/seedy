@@ -3,6 +3,7 @@
 #include <atomic>
 #include <memory>
 #include <cstring>
+#include <stdexcept>
 
 namespace MetalAtlas {
     struct Staging { id<MTLBuffer> buffer; std::shared_ptr<std::atomic<bool>> ready = std::make_shared<std::atomic<bool>>(true); };

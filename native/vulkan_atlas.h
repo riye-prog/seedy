@@ -2,6 +2,7 @@
 #include "map_atlas.h"
 #include <cstring>
 #include <stdexcept>
+#include <string>
 
 namespace VulkanAtlas {
     struct Staging { VkBuffer buffer = VK_NULL_HANDLE; VkDeviceMemory memory = VK_NULL_HANDLE; void *mapped = nullptr; uint64_t submit = 0, timeline = 0; };

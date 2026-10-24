@@ -5,6 +5,7 @@
 #include <cstdint>
 #include <unordered_map>
 #include <vector>
+#include <utility>
 
 namespace MapAtlas {
     constexpr int side = 2048, tileSide = 32, pitch = 34, columns = side / pitch, capacity = columns * columns, uploadLimit = 64;
