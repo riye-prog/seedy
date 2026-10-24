@@ -79,16 +79,27 @@ public final class McoptRenderProbe {
             var miniSamples = new ArrayList<Long>();
             var countData = arena.allocate(JAVA_INT,4);
             var output = new ArrayList<Map<String,Object>>();
+            boolean predictedTerrain = false;
             for (int pass = 0; pass < (arguments.length > 2 ? 4 : 3); pass++) {
                 boolean minimap = pass == 3;
                 if (minimap) {
                     var data = NativeGui.class.getDeclaredMethod("mapData",int.class,String.class); data.setAccessible(true);
                     var position = NativeGui.class.getDeclaredMethod("mapPosition",double.class,double.class,float.class); position.setAccessible(true);
-                    data.invoke(null,1,Files.readString(Path.of(arguments[2])));
+                    var predicted = com.google.gson.JsonParser.parseString(Files.readString(Path.of(arguments[2]))).getAsJsonObject();
+                    predictedTerrain = predicted.has("terrain") && predicted.get("terrain").getAsBoolean();
+                    data.invoke(null,1,predicted.toString());
                     data.invoke(null,2,"{\"reset\":1,\"dimension\":\"overworld\"}");
                     for (int z = 5; z <= 8; ++z) for (int x = 7; x <= 10; ++x) data.invoke(null,2,terrainPacket(x,z));
                     position.invoke(null,128.0,96.0,45f);
                     var next = com.google.gson.JsonParser.parseString(snapshot).getAsJsonObject();
+                    if (predictedTerrain) {
+                        double x = (predicted.get("minX").getAsDouble() + predicted.get("maxX").getAsDouble()) / 2;
+                        double z = (predicted.get("minZ").getAsDouble() + predicted.get("maxZ").getAsDouble()) / 2;
+                        next.add("seed",predicted.get("seed")); next.addProperty("x",x); next.addProperty("z",z);
+                        if (predicted.has("biome")) next.add("biome",predicted.get("biome"));
+                        next.getAsJsonObject("uiSettings").addProperty("miniMode",2);
+                        position.invoke(null,x,z,45f);
+                    }
                     if (arguments.length > 3) {
                         var terrain = com.google.gson.JsonParser.parseString(Files.readString(Path.of(arguments[3]))).getAsJsonObject();
                         data.invoke(null,2,"{\"reset\":1,\"dimension\":\"overworld\"}");
@@ -125,7 +136,7 @@ public final class McoptRenderProbe {
                     int terrain = 0;
                     for (int i = 0; i < BYTES; i += 4) {
                         int blue = Byte.toUnsignedInt(image[i]), green = Byte.toUnsignedInt(image[i + 1]), red = Byte.toUnsignedInt(image[i + 2]);
-                        if (arguments.length > 3 ? green > red * 1.05 && green > blue * 1.1 && green > 35 : blue == 90 && green == 168 && red == 117) ++terrain;
+                        if (arguments.length > 3 || predictedTerrain ? green > red * 1.05 && green > blue * 1.1 && green > 35 : blue == 90 && green == 168 && red == 117) ++terrain;
                     }
                     if (terrain < 64) throw new IllegalStateException("Loaded terrain pixels were not sampled from the atlas");
                 }

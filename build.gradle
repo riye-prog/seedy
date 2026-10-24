@@ -1,5 +1,5 @@
 plugins { id 'net.fabricmc.fabric-loom' version '1.17.21' }
-version = "0.9.23+${project.name}"
+version = "0.9.24+${project.name}"
 group = 'dev.seedy'
 base.archivesName = 'seedy'
 repositories { mavenCentral() }
@@ -49,6 +49,13 @@ tasks.register('savedTerrainProbe', JavaExec) {
     mainClass = 'dev.seedy.SavedTerrainProbe'
     jvmArgs '-Djava.awt.headless=true'
     doFirst { args project.property('terrainArgs').split(',') }
+}
+tasks.register('seedTerrainProbe', JavaExec) {
+    dependsOn testClasses
+    classpath = sourceSets.test.runtimeClasspath
+    mainClass = 'dev.seedy.SeedTerrainProbe'
+    jvmArgs '-Djava.awt.headless=true'
+    doFirst { args((project.findProperty('seedTerrainArgs' + project.name) ?: project.property('seedTerrainArgs')).split(',')) }
 }
 tasks.register('mcoptLoaderProbe', JavaExec) {
     dependsOn testClasses

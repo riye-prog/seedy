@@ -11,7 +11,7 @@ import java.util.List;
 import static org.junit.jupiter.api.Assertions.*;
 
 class SeedMapTest {
-    @BeforeAll static void bootstrap() { SharedConstants.tryDetectVersion(); Bootstrap.bootStrap(); }
+    @BeforeAll static void bootstrap() { SharedConstants.tryDetectVersion(); Bootstrap.bootStrap(); SeedTerrainProbe.prepareVanillaTags(); }
 
     @Test void tilesCoverNegativeCoordinatesAndRejectUnboundedWork() {
         var tiles = SeedMap.tiles(-129,-1,127,128,128);
@@ -180,13 +180,58 @@ class SeedMapTest {
         }
     }
 
+    @Test void seedTerrainUsesRealSurfacePixelsAndReusesThemAcrossViewports() {
+        assertTimeoutPreemptively(Duration.ofSeconds(90),() -> {
+            initializeTerrainColors();
+            try (var map = new SeedMap()) {
+                long seed = -7619526468459309251L;
+                long started = System.nanoTime();
+                map.request(new SeedMap.Request(700,seed,"overworld",64,1,0,0,31,31,"","any",null,true,"",true,true));
+                var first = await(map,700);
+                assertTrue(first.get("terrain").getAsBoolean());
+                var tile = first.getAsJsonArray("tiles").get(0).getAsJsonObject();
+                assertEquals("surface",tile.get("quality").getAsString());
+                byte[] pixels = java.util.Base64.getDecoder().decode(tile.get("pixels").getAsString());
+                assertEquals(128 * 128 * 3,pixels.length);
+                assertEquals(128,tile.get("resolution").getAsInt());
+                var colors = new java.util.HashSet<Integer>();
+                for (int i = 0; i < pixels.length; i += 3) colors.add((pixels[i] & 255) << 16 | (pixels[i + 1] & 255) << 8 | pixels[i + 2] & 255);
+                assertTrue(colors.size() > 4,colors.toString());
+                System.out.println("seed terrain first tile ms=" + (System.nanoTime() - started) / 1_000_000);
+                map.request(new SeedMap.Request(701,seed,"overworld",64,1,0,0,31,31,"","any",null,true,"",true,true));
+                assertEquals(first.get("tiles"),await(map,701).get("tiles"));
+                map.request(new SeedMap.Request(702,seed,"overworld",64,16,0,0,511,511,"","any",null,true,"",true,true));
+                var far = await(map,702);
+                assertEquals("overview",far.getAsJsonArray("tiles").get(0).getAsJsonObject().get("quality").getAsString());
+                assertEquals(4096,far.getAsJsonArray("tiles").get(0).getAsJsonObject().get("pixels").getAsString().length());
+                map.request(new SeedMap.Request(703,seed,"overworld",64,1,-128,-128,127,127,"","any",null,true,"",true,true));
+                map.reset();
+                map.request(new SeedMap.Request(704,37,"the_end",64,4,0,0,127,127,"","any"));
+                assertEquals("37",await(map,704).get("seed").getAsString());
+            }
+        });
+    }
+
+    static void initializeTerrainColors() throws Exception {
+        for (String name : List.of("grass","foliage")) try (var input = SeedMapTest.class.getResourceAsStream("/assets/minecraft/textures/colormap/" + name + ".png")) {
+            var image = javax.imageio.ImageIO.read(input);
+            int[] colors = image.getRGB(0,0,image.getWidth(),image.getHeight(),null,0,image.getWidth());
+            if (name.equals("grass")) net.minecraft.world.level.GrassColor.init(colors); else net.minecraft.world.level.FoliageColor.init(colors);
+        }
+    }
+
     private static JsonObject await(SeedMap map, long id) throws InterruptedException {
         long deadline = System.nanoTime() + 60_000_000_000L;
         while (System.nanoTime() < deadline) {
             String packet;
             while ((packet = map.poll()) != null) {
                 var decoded = com.google.gson.JsonParser.parseString(packet).getAsJsonObject();
-                if (decoded.has("tiles")) assertTrue(decoded.getAsJsonArray("tiles").size() <= 4);
+                if (decoded.has("tiles")) {
+                    var tiles = decoded.getAsJsonArray("tiles");
+                    assertTrue(tiles.size() <= 4);
+                    long detailed = java.util.stream.StreamSupport.stream(tiles.spliterator(),false).filter(tile -> tile.getAsJsonObject().has("resolution") && tile.getAsJsonObject().get("resolution").getAsInt() > 32).count();
+                    assertTrue(detailed <= 1,"Detailed seed uploads must stay bounded per frame");
+                }
             }
             var snapshot = map.snapshot();
             if (snapshot.has("id") && snapshot.get("id").getAsLong() == id && snapshot.get("remaining").getAsInt() == 0) {

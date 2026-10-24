@@ -70,7 +70,7 @@ static void receiveTerrain(const Json &incoming) {
 
 static void minimapSettings() {
     ImGui::Checkbox("Enable minimap (F10)",&preferences.miniEnabled);
-    const char *modes[] = {"Terrain + seed biomes","Loaded terrain","Seed biomes"};
+    const char *modes[] = {"Automatic","Loaded terrain","Seed terrain"};
     ImGui::SetNextItemWidth(260 * uiScale); ImGui::Combo("Map layers",&preferences.miniMode,modes,3);
     const char *anchors[] = {"Top left","Top right","Bottom left","Bottom right"};
     ImGui::SetNextItemWidth(260 * uiScale); ImGui::Combo("Minimap position",&preferences.miniAnchor,anchors,4);
@@ -83,7 +83,7 @@ static void minimapSettings() {
     const char *end[] = {"All End cities","Cities with elytra","Cities without elytra"};
     if (dimension == "the_end" && preferences.miniTarget > 2) preferences.miniTarget = 0;
     ImGui::SetNextItemWidth(260 * uiScale); ImGui::Combo("Minimap structures",&preferences.miniTarget,dimension == "the_nether" ? nether : dimension == "the_end" ? end : overworld,dimension == "the_end" ? 3 : 4);
-    ImGui::TextWrapped("Terrain shows the chunks you have loaded. Seed biomes fill unexplored areas after recovery. In the Nether, the map follows your height.");
+    ImGui::TextWrapped("Automatic fills unexplored areas with terrain predicted from the seed. Trees and buildings are generated from the seed at close zoom. Loaded chunks show player changes. In the Nether, the map follows your height.");
 }
 
 static void minimapCornerMask(ImDrawList *draw, ImVec2 start, ImVec2 end, float radius, ImU32 color) {
@@ -151,7 +151,14 @@ static void drawMinimap(int width, int height) {
     };
     if (predicted && preferences.miniMode != 1) {
         int span = incoming.value("step",1) * 32;
-        for (const auto &tile : miniView.tiles) if (visible(tile.x * span,tile.z * span,span)) image(mapTexture(tile,miniView,true,false,-1),tile.x * span,tile.z * span,span);
+        for (const auto &tile : miniView.tiles) if (visible(tile.x * span,tile.z * span,span)) {
+            bool detailed = tile.resolution == 128 && scale / preferences.miniZoom * incoming.value("step",1) > 1.5;
+            int parts = detailed ? 16 : 1;
+            for (int part = 0; part < parts; ++part) {
+                double size = span / double(detailed ? 4 : 1), x = tile.x * span + (detailed ? part % 4 * size : 0), z = tile.z * span + (detailed ? part / 4 * size : 0);
+                if (visible(x,z,size)) image(mapTexture(tile,miniView,true,false,-1,detailed ? part : -1),x,z,size);
+            }
+        }
     }
     int rendered = 0;
     bool detailed = scale / preferences.miniZoom > 1.5f && preferences.miniSize * preferences.miniZoom <= 400;

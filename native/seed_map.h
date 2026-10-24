@@ -7,12 +7,17 @@ struct MapTile {
     std::vector<int> counts, anchors;
     std::vector<int> cells = std::vector<int>(1024);
     std::vector<unsigned char> shade = std::vector<unsigned char>(1024,128);
+    std::vector<ImU32> pixels;
+    std::vector<ImU32> overview;
+    int resolution = 32;
+    std::array<uint64_t,16> detailKeys = [] { std::array<uint64_t,16> result{}; for (auto &key : result) key = (++MapAtlas::sequence << 1) | 1; return result; }();
+    std::vector<bool> wet;
 };
 
 struct MapView {
     double x = 0, z = 0, blocksPerPixel = 4;
     int dimension = 0, target = 0, y = 64, cityFilter = 0;
-    bool structures = true, initialized = false;
+    bool structures = true, initialized = false, terrain = true;
     double changedAt = 0;
     long long requestId = 0, revision = -1;
     std::string seed, desiredKey, sentKey;
@@ -42,7 +47,7 @@ static void mapDecode(MapView &mapView, const Json &incoming) {
     mapView.revision = incoming.value("revision", -1LL);
     auto previousTiles = std::move(mapView.tiles);
     bool partial = incoming.value("partial",false);
-    bool sameWorld = mapView.data.value("seed","") == incoming.value("seed","") && mapView.data.value("dimension","") == incoming.value("dimension","") && mapView.data.value("y",64) == incoming.value("y",64) && mapView.data.value("step",1) == incoming.value("step",1);
+    bool sameWorld = mapView.data.value("seed","") == incoming.value("seed","") && mapView.data.value("dimension","") == incoming.value("dimension","") && mapView.data.value("y",64) == incoming.value("y",64) && mapView.data.value("step",1) == incoming.value("step",1) && mapView.data.value("terrain",false) == incoming.value("terrain",false);
     bool compatible = sameWorld && mapView.data.value("palette",Json::array()) == incoming.value("palette",Json::array());
     if (!compatible) previousTiles.clear();
     mapView.tiles.clear();
@@ -64,6 +69,39 @@ static void mapDecode(MapView &mapView, const Json &incoming) {
         MapTile decoded{};
         decoded.x = x; decoded.z = z; decoded.version = version;
         if (version > 0) decoded.atlasKey = (uint64_t(version) << 1) | 1;
+        const auto encoded = tile.value("pixels",std::string{});
+        int resolution = tile.value("resolution",32);
+        if ((resolution == 32 || resolution == 128) && encoded.size() == size_t(resolution * resolution * 4)) {
+            decoded.resolution = resolution;
+            auto digit = [](unsigned char value) -> int { return value >= 'A' && value <= 'Z' ? value - 'A' : value >= 'a' && value <= 'z' ? value - 'a' + 26 : value >= '0' && value <= '9' ? value - '0' + 52 : value == '+' ? 62 : value == '/' ? 63 : -1; };
+            decoded.pixels.reserve(resolution * resolution);
+            for (size_t offset = 0; offset < encoded.size(); offset += 4) {
+                int a = digit(encoded[offset]), b = digit(encoded[offset + 1]), c = digit(encoded[offset + 2]), d = digit(encoded[offset + 3]);
+                if (a < 0 || b < 0 || c < 0 || d < 0) { decoded.pixels.clear(); break; }
+                unsigned int value = (a << 18) | (b << 12) | (c << 6) | d;
+                decoded.pixels.push_back(IM_COL32((value >> 16) & 255,(value >> 8) & 255,value & 255,255));
+            }
+            if (!decoded.pixels.empty() && resolution > 32) {
+                decoded.overview.resize(1024);
+                int scale = resolution / 32;
+                for (int z = 0; z < 32; ++z) for (int x = 0; x < 32; ++x) {
+                    int red = 0, green = 0, blue = 0;
+                    for (int dz = 0; dz < scale; ++dz) for (int dx = 0; dx < scale; ++dx) { auto color = decoded.pixels[(z * scale + dz) * resolution + x * scale + dx]; red += color & 255; green += color >> 8 & 255; blue += color >> 16 & 255; }
+                    decoded.overview[z * 32 + x] = IM_COL32(red / (scale * scale),green / (scale * scale),blue / (scale * scale),255);
+                }
+            }
+        }
+        const auto water = tile.value("water",std::string{});
+        if (water.size() == 256) {
+            auto digit = [](char value) -> int { return value >= '0' && value <= '9' ? value - '0' : value >= 'a' && value <= 'f' ? value - 'a' + 10 : -1; };
+            decoded.wet.assign(1024,false);
+            for (size_t index = 0; index < 128; ++index) {
+                int upper = digit(water[index * 2]), lower = digit(water[index * 2 + 1]);
+                if (upper < 0 || lower < 0) { decoded.wet.clear(); break; }
+                int mask = upper * 16 + lower;
+                for (int bit = 0; bit < 8; ++bit) decoded.wet[index * 8 + bit] = (mask & (1 << bit)) != 0;
+            }
+        }
         decoded.counts.assign(mapView.colors.size(),0); decoded.anchors.assign(mapView.colors.size(),-1);
         auto heights = tile.value("heights",std::vector<int>{});
         if (heights.size() == 49) {
@@ -114,13 +152,16 @@ static void mapReceive(const std::string &dimension) {
     mapDecode(mapView,incoming);
 }
 
-static MapAtlas::Region mapTexture(const MapTile &tile, const MapView &view, bool relief, bool coastlines, int highlight) {
+static MapAtlas::Region mapTexture(const MapTile &tile, const MapView &view, bool relief, bool coastlines, int highlight, int part = -1) {
     uint64_t variant = static_cast<uint64_t>((highlight + 1) * 4 + (relief ? 1 : 0) + (coastlines ? 2 : 0));
-    return MapAtlas::get((tile.atlasKey << 12) | variant,[&](auto &pixels) {
+    return MapAtlas::get(((part >= 0 ? tile.detailKeys[part] : tile.atlasKey) << 12) | variant,[&](auto &pixels) {
         for (int i = 0; i < 1024; ++i) {
-            int value = tile.cells[i]; ImU32 color = view.colors[value];
-            float factor = (relief ? tile.shade[i] / 128.0f : 1.0f) * (highlight >= 0 && value != highlight ? 0.35f : 1.0f);
-            if (coastlines && ((i % 32 < 31 && view.water[value] != view.water[tile.cells[i + 1]]) || (i < 992 && view.water[value] != view.water[tile.cells[i + 32]]))) factor *= 0.78f;
+            int source = part < 0 ? i : (part / 4 * 32 + i / 32) * 128 + part % 4 * 32 + i % 32;
+            int cell = part < 0 ? i : (part / 4 * 8 + i / 32 / 4) * 32 + part % 4 * 8 + i % 32 / 4;
+            int value = tile.cells[cell]; ImU32 color = tile.pixels.empty() ? view.colors[value] : part >= 0 ? tile.pixels[source] : tile.overview.empty() ? tile.pixels[i] : tile.overview[i];
+            float factor = (tile.pixels.empty() && relief ? tile.shade[i] / 128.0f : 1.0f) * (highlight >= 0 && value != highlight ? 0.35f : 1.0f);
+            auto wet = [&](int index) { return tile.wet.empty() ? view.water[tile.cells[index]] : tile.wet[index]; };
+            if (coastlines && ((cell % 32 < 31 && wet(cell) != wet(cell + 1)) || (cell < 992 && wet(cell) != wet(cell + 32)))) factor *= tile.pixels.empty() ? 0.78f : 0.90f;
             pixels[i] = IM_COL32(std::min(255,int((color & 255) * factor)),std::min(255,int(((color >> 8) & 255) * factor)),std::min(255,int(((color >> 16) & 255) * factor)),255);
         }
     });
@@ -207,15 +248,20 @@ static void mapPanel(Json &command) {
         view.x = 0; view.z = 0; view.y = 64;
     }
     if (preferences.controls) {
-    mapSection("Biome height");
+    mapSection("Map layer");
+    if (ImGui::SmallButton("Surface")) { view.terrain = true; view.y = 64; view.tiles.clear(); view.data = Json::object(); }
+    if (ImGui::IsItemHovered()) ImGui::SetTooltip("Generates terrain, trees, and buildings from the seed at close zoom. Player changes require loaded chunks. Custom generation can differ.");
+    ImGui::SameLine();
+    if (ImGui::SmallButton("Biomes")) { view.terrain = false; view.y = 64; view.tiles.clear(); view.data = Json::object(); }
+    ImGui::SameLine();
+    if (ImGui::SmallButton("Caves")) { view.terrain = false; view.y = -40; view.tiles.clear(); view.data = Json::object(); }
+    if (!view.terrain || dimension == "the_nether") {
     ImGui::SetNextItemWidth(64 * uiScale);
     bool heightChanged = ImGui::InputInt("Y##map", &view.y, 0, 0);
     view.y = std::clamp(view.y, -64, 320);
     if (heightChanged) { view.tiles.clear(); view.data = Json::object(); }
     if (ImGui::IsItemHovered()) ImGui::SetTooltip("Biome slice height. Try Y -40 for underground biomes.");
-    if (ImGui::SmallButton("Surface")) { view.y = 64; view.tiles.clear(); view.data = Json::object(); }
-    ImGui::SameLine();
-    if (ImGui::SmallButton("Caves")) { view.y = -40; view.tiles.clear(); view.data = Json::object(); }
+    }
     ImGui::BeginDisabled(!state.value("connected", false) || state.value("dimension", "overworld") != dimension);
     if (ImGui::Button("Player##map")) { view.x = state.value("x", 0); view.z = state.value("z", 0); }
     ImGui::SameLine(); ImGui::Checkbox("Follow", &view.followPlayer);
@@ -282,7 +328,9 @@ static void mapPanel(Json &command) {
     ImGui::BeginChild("map-viewport",{0,0},ImGuiChildFlags_None,ImGuiWindowFlags_NoScrollWithMouse);
     if (view.followPlayer && state.value("connected",false) && state.value("dimension", "overworld") == dimension) { view.x = state.value("x",0); view.z = state.value("z",0); }
     ImGui::TextUnformatted(dimensionNames[view.dimension]);
-    ImGui::SameLine(); ImGui::TextDisabled("   Y %d   /   %.3g blocks per pixel",view.y,view.blocksPerPixel);
+    ImGui::SameLine();
+    if (view.terrain && dimension != "the_nether") ImGui::TextDisabled("   Seed terrain   /   %.3g blocks per pixel",view.blocksPerPixel);
+    else ImGui::TextDisabled("   Y %d   /   %.3g blocks per pixel",view.y,view.blocksPerPixel);
 
     ImVec2 size{ImGui::GetContentRegionAvail().x, std::max(100 * uiScale, ImGui::GetContentRegionAvail().y - 126 * uiScale)};
     ImVec2 start = ImGui::GetCursorScreenPos(), end{start.x + size.x, start.y + size.y}, middle{start.x + size.x / 2, start.y + size.y / 2};
@@ -309,7 +357,7 @@ static void mapPanel(Json &command) {
     const int tileBudgets[] = {64,192,512};
     while (tileCount(step * 32) > tileBudgets[preferences.detail]) step *= 2;
     bool structuresVisible = view.structures && !target.empty();
-    Json request = {{"action","map"},{"dimension",dimension},{"y",view.y},{"step",step},{"minX",minX},{"minZ",minZ},{"maxX",maxX},{"maxZ",maxZ},{"target",view.structures ? target : ""},{"cityFilter",cityFilter},{"relief",preferences.relief}};
+    Json request = {{"action","map"},{"dimension",dimension},{"y",view.y},{"step",step},{"minX",minX},{"minZ",minZ},{"maxX",maxX},{"maxZ",maxZ},{"target",view.structures ? target : ""},{"cityFilter",cityFilter},{"relief",preferences.relief},{"terrain",view.terrain}};
     Json key = request;
     for (const char *name : {"minX", "minZ", "maxX", "maxZ"}) key[name] = static_cast<int>(std::floor(request[name].get<double>() / (step * 32)));
     key["structureBounds"] = {static_cast<int>(std::floor(minX / 1024.0)),static_cast<int>(std::floor(minZ / 1024.0)),static_cast<int>(std::floor(maxX / 1024.0)),static_cast<int>(std::floor(maxZ / 1024.0))};
@@ -342,8 +390,13 @@ static void mapPanel(Json &command) {
         int tileX = tile.x * drawnStep * 32, tileZ = tile.z * drawnStep * 32;
         if (tileX > maxX || tileZ > maxZ || tileX + drawnStep * 32 < minX || tileZ + drawnStep * 32 < minZ) continue;
         if (hovered && mouseX >= tileX && mouseX < tileX + drawnStep * 32 && mouseZ >= tileZ && mouseZ < tileZ + drawnStep * 32) biome = tile.cells[static_cast<int>((mouseZ - tileZ) / drawnStep) * 32 + static_cast<int>((mouseX - tileX) / drawnStep)];
-        auto texture = mapTexture(tile,view,preferences.relief,preferences.coastlines,view.highlight);
-        if (texture.ready) draw->AddImage(MapAtlas::texture,point(tileX,tileZ),point(tileX + drawnStep * 32,tileZ + drawnStep * 32),texture.first,texture.last);
+        bool detailed = tile.resolution == 128 && drawnStep / view.blocksPerPixel > 1.5;
+        int parts = detailed ? 16 : 1;
+        for (int part = 0; part < parts; ++part) {
+            double span = drawnStep * (detailed ? 8 : 32), x = tileX + (detailed ? part % 4 * span : 0), z = tileZ + (detailed ? part / 4 * span : 0);
+            auto texture = mapTexture(tile,view,preferences.relief,preferences.coastlines,view.highlight,detailed ? part : -1);
+            if (texture.ready) draw->AddImage(!tile.pixels.empty() && MapAtlas::nearestTexture ? MapAtlas::nearestTexture : MapAtlas::texture,point(x,z),point(x + span,z + span),texture.first,texture.last);
+        }
         ImVec2 a = point(tileX,tileZ), b = point(tileX + drawnStep * 32,tileZ + drawnStep * 32);
         double area = std::max(0.0f,std::min(b.x,end.x) - std::max(a.x,start.x)) * std::max(0.0f,std::min(b.y,end.y) - std::max(a.y,start.y));
         for (size_t value = 0; value < tile.counts.size(); ++value) if (tile.counts[value]) {

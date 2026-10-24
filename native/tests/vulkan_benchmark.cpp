@@ -112,8 +112,16 @@ int main(int argc, char **argv) {
             }
             state["seed"] = fixture.value("seed",""); state["gameVersion"] = "26.3"; state["generationVersion"] = "26.3";
             state["uiSettings"]["miniEnabled"] = true; state["uiSettings"]["hudEnabled"] = false;
+            state["uiSettings"]["miniZoom"] = fixture.value("previewZoom",0.75f);
             if (argc > 4 && std::string(argv[4]) == "biomes") state["uiSettings"]["miniMode"] = 2;
             liveMapX = 128; liveMapZ = 96; liveMapYaw = 45;
+            if (fixture.value("terrain",false)) {
+                liveMapX = (fixture.value("minX",0) + fixture.value("maxX",0)) / 2.0;
+                liveMapZ = (fixture.value("minZ",0) + fixture.value("maxZ",0)) / 2.0;
+                state["x"] = liveMapX; state["z"] = liveMapZ;
+                state["biome"] = fixture.value("biome","minecraft:plains");
+                if (panelTest) { mapView.x = liveMapX; mapView.z = liveMapZ; mapView.blocksPerPixel = 0.5; }
+            }
             receiveTerrain({{"reset",1},{"dimension","overworld"}});
             if (argc > 5) {
                 Json terrain; std::ifstream(argv[5]) >> terrain;

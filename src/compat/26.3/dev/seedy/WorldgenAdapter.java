@@ -74,4 +74,9 @@ final class WorldgenAdapter {
         return holder.value().generate(holder, dimension, registries, world.generator(), source, random.createClimateSampler(SamplerContext.EMPTY_UNCACHED), random, templates, seed, position, 0, world.height(), holder.value().biomes()::contains);
     }
 
+    static Locator.StructureWorld withPlacements(Locator.StructureWorld world, long seed, HolderLookup.RegistryLookup<net.minecraft.world.level.levelgen.structure.StructureSet> sets) {
+        var random = world.placements().randomState();
+        var placements = net.minecraft.world.level.chunk.ChunkGeneratorStructureState.createForNormal(random,seed,world.generator().getOrigin(random), world.generator().getBiomeSource(),sets);
+        return new Locator.StructureWorld(world.dimension(),placements,world.generator(),world.height(),world.biomes());
+    }
 }

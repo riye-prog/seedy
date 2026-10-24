@@ -1,0 +1,346 @@
+{
+  "version": "0.9.24",
+  "published": false,
+  "scope": "headless Java generation, saved-world NBT comparisons, native interaction, Windows cross compilation, offscreen Vulkan and released mcopt Metal; no Minecraft instance launched",
+  "tests": {
+    "26.2": {
+      "fullTests": 102,
+      "fullFailures": 0,
+      "fullSkipped": 1,
+      "finalStreamingTests": 9,
+      "finalStreamingFailures": 0
+    },
+    "26.3": {
+      "fullTests": 101,
+      "fullFailures": 0,
+      "fullSkipped": 1,
+      "finalStreamingTests": 9,
+      "finalStreamingFailures": 0
+    }
+  },
+  "jars": {
+    "26.2": {
+      "path": "artifacts/preview-0.9.24/seedy-0.9.24+26.2.jar",
+      "bytes": 38337228,
+      "sha256": "b6809e0d98ce05d432a7b4f88907a761d37b8235c35f76c1c65868bbd009c08c",
+      "nativePayloads": {
+        "natives/macos-universal/libseedy.dylib": "b33b7fd71ae6d6d16d65a14173a544c5145f236a7d7c520bca80209e0438bf96",
+        "natives/windows-x86_64/seedy.dll": "17bb86858b77702c7bb6dbbdf0c896598b06d995dda6d4f2be41c45ee49152ea"
+      }
+    },
+    "26.3": {
+      "path": "artifacts/preview-0.9.24/seedy-0.9.24+26.3.jar",
+      "bytes": 38336536,
+      "sha256": "31a6cf30ca0be94ff322dede086bc33f53379e67bcbaadb03beb8a8c7362c974",
+      "nativePayloads": {
+        "natives/macos-universal/libseedy.dylib": "b33b7fd71ae6d6d16d65a14173a544c5145f236a7d7c520bca80209e0438bf96",
+        "natives/windows-x86_64/seedy.dll": "17bb86858b77702c7bb6dbbdf0c896598b06d995dda6d4f2be41c45ee49152ea"
+      }
+    }
+  },
+  "savedWorldVillage": {
+    "seed": "-7619526468459309251",
+    "buildings": {
+      "columns": 880,
+      "matchingHeights": 833,
+      "matchingSurfaceBlocks": 830
+    },
+    "leaves": {
+      "columns": 429,
+      "matchingHeights": 322,
+      "matchingSurfaceBlocks": 321
+    },
+    "other": {
+      "columns": 5091,
+      "matchingHeights": 4903,
+      "matchingSurfaceBlocks": 4807
+    },
+    "differences": [
+      {
+        "x": 94,
+        "z": -321,
+        "saved": "grass_block@99",
+        "predicted": "minecraft:grass_block@98"
+      },
+      {
+        "x": 122,
+        "z": -336,
+        "saved": "grass_block@101",
+        "predicted": "minecraft:cherry_log@106"
+      },
+      {
+        "x": 122,
+        "z": -335,
+        "saved": "grass_block@101",
+        "predicted": "minecraft:cherry_log@105"
+      },
+      {
+        "x": 120,
+        "z": -334,
+        "saved": "grass_block@100",
+        "predicted": "minecraft:cherry_leaves@109"
+      },
+      {
+        "x": 121,
+        "z": -334,
+        "saved": "grass_block@100",
+        "predicted": "minecraft:cherry_leaves@109"
+      },
+      {
+        "x": 122,
+        "z": -334,
+        "saved": "grass_block@101",
+        "predicted": "minecraft:cherry_leaves@109"
+      },
+      {
+        "x": 123,
+        "z": -334,
+        "saved": "grass_block@101",
+        "predicted": "minecraft:cherry_leaves@109"
+      },
+      {
+        "x": 124,
+        "z": -334,
+        "saved": "grass_block@101",
+        "predicted": "minecraft:cherry_leaves@109"
+      },
+      {
+        "x": 119,
+        "z": -333,
+        "saved": "grass_block@100",
+        "predicted": "minecraft:cherry_leaves@109"
+      },
+      {
+        "x": 120,
+        "z": -333,
+        "saved": "grass_block@100",
+        "predicted": "minecraft:cherry_leaves@110"
+      },
+      {
+        "x": 121,
+        "z": -333,
+        "saved": "grass_block@100",
+        "predicted": "minecraft:cherry_leaves@110"
+      },
+      {
+        "x": 122,
+        "z": -333,
+        "saved": "grass_block@100",
+        "predicted": "minecraft:cherry_leaves@110"
+      },
+      {
+        "x": 123,
+        "z": -333,
+        "saved": "grass_block@101",
+        "predicted": "minecraft:cherry_leaves@110"
+      },
+      {
+        "x": 124,
+        "z": -333,
+        "saved": "grass_block@101",
+        "predicted": "minecraft:cherry_leaves@110"
+      },
+      {
+        "x": 126,
+        "z": -333,
+        "saved": "grass_block@101",
+        "predicted": "minecraft:dirt_path@101"
+      },
+      {
+        "x": 127,
+        "z": -333,
+        "saved": "grass_block@101",
+        "predicted": "minecraft:dirt_path@101"
+      }
+    ],
+    "scope": "seed-generated decoration compared with saved-world surface columns, including leaves and buildings"
+  },
+  "savedWorldForest": {
+    "seed": "-7619526468459309251",
+    "leaves": {
+      "columns": 2988,
+      "matchingHeights": 2422,
+      "matchingSurfaceBlocks": 2422
+    },
+    "other": {
+      "columns": 3412,
+      "matchingHeights": 3006,
+      "matchingSurfaceBlocks": 3006
+    },
+    "differences": [
+      {
+        "x": -26,
+        "z": -48,
+        "saved": "grass_block@92",
+        "predicted": "minecraft:birch_leaves@96"
+      },
+      {
+        "x": -25,
+        "z": -48,
+        "saved": "grass_block@92",
+        "predicted": "minecraft:birch_leaves@97"
+      },
+      {
+        "x": -24,
+        "z": -48,
+        "saved": "grass_block@92",
+        "predicted": "minecraft:birch_leaves@97"
+      },
+      {
+        "x": -23,
+        "z": -48,
+        "saved": "grass_block@92",
+        "predicted": "minecraft:birch_leaves@97"
+      },
+      {
+        "x": -26,
+        "z": -47,
+        "saved": "grass_block@92",
+        "predicted": "minecraft:birch_leaves@97"
+      },
+      {
+        "x": -25,
+        "z": -47,
+        "saved": "grass_block@92",
+        "predicted": "minecraft:birch_leaves@98"
+      },
+      {
+        "x": -24,
+        "z": -47,
+        "saved": "grass_block@92",
+        "predicted": "minecraft:birch_leaves@99"
+      },
+      {
+        "x": -23,
+        "z": -47,
+        "saved": "grass_block@92",
+        "predicted": "minecraft:birch_leaves@98"
+      },
+      {
+        "x": -26,
+        "z": -46,
+        "saved": "grass_block@92",
+        "predicted": "minecraft:birch_leaves@97"
+      },
+      {
+        "x": -25,
+        "z": -46,
+        "saved": "birch_leaves@98",
+        "predicted": "minecraft:birch_leaves@99"
+      },
+      {
+        "x": -26,
+        "z": -45,
+        "saved": "grass_block@92",
+        "predicted": "minecraft:birch_leaves@97"
+      },
+      {
+        "x": -25,
+        "z": -45,
+        "saved": "birch_leaves@99",
+        "predicted": "minecraft:birch_leaves@97"
+      },
+      {
+        "x": -24,
+        "z": -45,
+        "saved": "birch_leaves@100",
+        "predicted": "minecraft:birch_leaves@99"
+      },
+      {
+        "x": -23,
+        "z": -45,
+        "saved": "birch_leaves@101",
+        "predicted": "minecraft:birch_leaves@98"
+      },
+      {
+        "x": -22,
+        "z": -45,
+        "saved": "birch_leaves@99",
+        "predicted": "minecraft:birch_leaves@98"
+      },
+      {
+        "x": -26,
+        "z": -44,
+        "saved": "grass_block@93",
+        "predicted": "minecraft:birch_leaves@97"
+      }
+    ],
+    "scope": "seed-generated decoration compared with saved-world surface columns, including leaves and buildings"
+  },
+  "vulkan": {
+    "atlas_tiles": 84,
+    "cpu_record_median_ms": 0.068208,
+    "cpu_record_p95_ms": 0.222083,
+    "extra_fence_waits": 0,
+    "extra_queue_submits": 0,
+    "framebuffer_creations": 0,
+    "frames": 120,
+    "gpu": "Apple M3",
+    "gpu_median_ms": 0.164583,
+    "gpu_p95_ms": 0.5095,
+    "height": 1964,
+    "maximum_vertices": 1052,
+    "minimap": true,
+    "panel": false,
+    "rendered_pixels_per_frame": 374496,
+    "width": 3024
+  },
+  "metal": {
+    "frames": [
+      {
+        "minimap": false,
+        "panel": false,
+        "image": "/tmp/seedy-decorated-metal-hud.bgra",
+        "frames": 120,
+        "changed_pixels": 62000,
+        "hud": true
+      },
+      {
+        "minimap": false,
+        "panel": true,
+        "image": "/tmp/seedy-decorated-metal-panel.bgra",
+        "frames": 8,
+        "changed_pixels": 790256,
+        "hud": false
+      },
+      {
+        "minimap": false,
+        "panel": false,
+        "image": "/tmp/seedy-decorated-metal-outlines.bgra",
+        "frames": 8,
+        "changed_pixels": 2991,
+        "hud": false
+      },
+      {
+        "minimap": true,
+        "panel": false,
+        "image": "/tmp/seedy-decorated-metal-minimap.bgra",
+        "frames": 120,
+        "changed_pixels": 154322,
+        "hud": true
+      }
+    ],
+    "jni_cpu_median_ms": 0.070333,
+    "in_flight": 2,
+    "minimap_jni_cpu_ms": {
+      "p95": 1.32725,
+      "median": 0.202333
+    },
+    "device": "Apple M3",
+    "mcopt": "0.3.0-alpha.2",
+    "width": 1440,
+    "scope": "actual released mcopt native library and Seedy JNI renderer; no Minecraft instance launched; not an in-game FPS measurement",
+    "one_mcopt_command_buffer_per_frame": true,
+    "height": 1000
+  },
+  "limitations": [
+    "fresh generation; chunk population order can change trees and edge blocks",
+    "player changes, custom feature seeds, datapacks, and mismatched generation versions can differ",
+    "entity spawning and underground fossil features are omitted",
+    "background generation is separate from rendering; timings while the user plays are not isolated benchmarks"
+  ],
+  "previews": [
+    "artifacts/seedy-seed-decoration-preview.png",
+    "artifacts/seedy-seed-forest-preview.png"
+  ]
+}

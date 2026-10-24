@@ -37,7 +37,7 @@ public final class SavedTerrainProbe {
         BlockState block(int x, int y, int z) { return states[paletteIndex(data,states.length,4,((y & 15) << 8) | (z << 4) | x)]; }
         String biome(int x, int y, int z) { return biomes[paletteIndex(biomeData,biomes.length,1,(((y & 15) >> 2) << 4) | ((z >> 2) << 2) | (x >> 2))]; }
     }
-    private record Surface(TerrainPalette.Material[] materials, int[] heights, int[] tints, int[] depths, int[] ground, String[] biomes) { }
+    private record Surface(TerrainPalette.Material[] materials, int[] heights, int[] tints, int[] depths, int[] ground, String[] biomes, BlockState[] blocks) { }
     private final Map<String,Model> models = new HashMap<>();
     private final IdentityHashMap<BlockState,TerrainPalette.Material> materials = new IdentityHashMap<>();
     private final Map<String,int[]> textures = new HashMap<>();
@@ -193,7 +193,7 @@ public final class SavedTerrainProbe {
             for (int i = 0; i < biomes.length; ++i) biomes[i] = i < names.size() ? names.get(i).asString().orElse("minecraft:plains") : "minecraft:plains";
             sections.put(section.getIntOr("Y",0),new Section(blocks,states.getLongArray("data").orElse(new long[0]),biomes,biome.getLongArray("data").orElse(new long[0])));
         }
-        var output = new Surface(new TerrainPalette.Material[256],new int[256],new int[256],new int[256],new int[256],new String[256]);
+        var output = new Surface(new TerrainPalette.Material[256],new int[256],new int[256],new int[256],new int[256],new String[256],new BlockState[256]);
         var biomeRegistry = WorldgenAdapter.registries().lookupOrThrow(Registries.BIOME);
         var order = sections.keySet().stream().sorted(Comparator.reverseOrder()).toList();
         for (int z = 0; z < 16; ++z) for (int x = 0; x < 16; ++x) {
@@ -205,7 +205,7 @@ public final class SavedTerrainProbe {
                     if (state.isAir()) continue;
                     var texture = material(state);
                     if (!texture.top() && !state.isSolidRender() && !state.hasBlockEntity() && !(state.getBlock() instanceof LeavesBlock)) continue;
-                    output.materials()[index] = texture; output.heights()[index] = y; output.ground()[index] = 0x263c29;
+                    output.materials()[index] = texture; output.heights()[index] = y; output.ground()[index] = 0x263c29; output.blocks()[index] = state;
                     String biomeName = section.biome(x,y,z); output.biomes()[index] = biomeName;
                     var holder = biomeRegistry.get(net.minecraft.resources.ResourceKey.create(Registries.BIOME,Identifier.parse(biomeName))).orElseThrow(); var biome = holder.value();
                     int tint = 0xffffff;
@@ -249,16 +249,86 @@ public final class SavedTerrainProbe {
         }
         result.addProperty("x",centerX); result.addProperty("z",centerZ); result.add("terrain",tiles);
         result.add("markers",markers);
-        for (Path folder = directory; folder != null; folder = folder.getParent()) if (Files.exists(folder.resolve("level.dat"))) {
-            var level = NbtIo.readCompressed(folder.resolve("level.dat"),NbtAccounter.unlimitedHeap()).getCompoundOrEmpty("Data");
-            result.addProperty("seed",Long.toString(level.getCompoundOrEmpty("WorldGenSettings").getLongOr("seed",0))); break;
-        }
+        result.addProperty("seed",Long.toString(worldSeed(directory)));
         var center = surface(baseX,baseZ);
         int local = Math.floorMod(centerZ,16) * 16 + Math.floorMod(centerX,16);
         result.addProperty("y",center == null ? 64 : center.heights()[local] + 2); result.addProperty("biome",center == null ? "minecraft:plains" : center.biomes()[local]);
         result.addProperty("scope","saved Minecraft chunks, vanilla block-model textures and biome tints; no Minecraft instance launched");
         System.out.println("terrain chunks=" + tiles.size() + " materials=" + materials.size() + " texture samples=" + textures.size());
         System.out.println(histogram.entrySet().stream().sorted(Map.Entry.<String,Integer>comparingByValue().reversed()).limit(12).toList());
+        return result;
+    }
+
+    static long worldSeed(Path directory) throws Exception {
+        for (Path folder = directory; folder != null; folder = folder.getParent()) {
+            Path modern = folder.resolve("data/minecraft/world_gen_settings.dat");
+            if (Files.exists(modern)) {
+                var data = NbtIo.readCompressed(modern,NbtAccounter.unlimitedHeap()).getCompoundOrEmpty("data");
+                if (data.contains("seed")) return data.getLongOr("seed",0);
+            }
+            if (Files.exists(folder.resolve("level.dat"))) {
+                var data = NbtIo.readCompressed(folder.resolve("level.dat"),NbtAccounter.unlimitedHeap()).getCompoundOrEmpty("Data").getCompoundOrEmpty("WorldGenSettings");
+                if (data.contains("seed")) return data.getLongOr("seed",0);
+            }
+        }
+        throw new IllegalStateException("Saved world seed metadata was not found");
+    }
+
+    static JsonObject compareSurface(Path directory, long seed, SeedTerrain terrain) throws Exception {
+        if (worldSeed(directory) != seed) throw new IllegalArgumentException("Saved world has a different seed");
+        var probe = new SavedTerrainProbe(directory);
+        int columns = 0, heights = 0, materials = 0;
+        var included = java.util.Set.of(Blocks.GRASS_BLOCK,Blocks.DIRT,Blocks.SAND,Blocks.GRAVEL,Blocks.STONE,Blocks.WATER,Blocks.RED_SAND,Blocks.PACKED_ICE,Blocks.ICE,Blocks.SNOW_BLOCK,Blocks.COARSE_DIRT,Blocks.PODZOL);
+        try {
+            for (int z = -2; z <= 2; ++z) for (int x = -2; x <= 2; ++x) {
+                var saved = probe.surface(x,z);
+                if (saved == null) continue;
+                for (int row = 0; row < 16; ++row) for (int col = 0; col < 16; ++col) {
+                    int index = row * 16 + col;
+                    var state = saved.blocks()[index];
+                    if (state == null || !included.contains(state.getBlock())) continue;
+                    var predicted = terrain.pixel(x * 16 + col,z * 16 + row,64);
+                    ++columns;
+                    if (predicted.height() == saved.heights()[index]) ++heights;
+                    if (predicted.height() == saved.heights()[index] && predicted.block().getBlock() == state.getBlock()) ++materials;
+                }
+            }
+        } finally { for (var region : probe.regions.values()) region.close(); }
+        var result = new JsonObject(); result.addProperty("seed",Long.toString(seed)); result.addProperty("columns",columns); result.addProperty("matchingHeights",heights); result.addProperty("matchingSurfaceBlocks",materials);
+        result.addProperty("scope","saved world columns with natural surface blocks; vegetation and structures excluded");
+        return result;
+    }
+
+    static JsonObject compareDecoration(Path directory, long seed, SeedTerrain terrain, int centerX, int centerZ, int radius) throws Exception {
+        if (worldSeed(directory) != seed) throw new IllegalArgumentException("Saved world has a different seed");
+        var probe = new SavedTerrainProbe(directory);
+        var groups = new java.util.TreeMap<String,int[]>();
+        var differences = new JsonArray();
+        try {
+            for (int z = (centerZ >> 4) - radius; z <= (centerZ >> 4) + radius; ++z) for (int x = (centerX >> 4) - radius; x <= (centerX >> 4) + radius; ++x) {
+                var saved = probe.surface(x,z);
+                if (saved == null) continue;
+                for (int row = 0; row < 16; ++row) for (int col = 0; col < 16; ++col) {
+                    int index = row * 16 + col;
+                    var state = saved.blocks()[index];
+                    if (state == null) continue;
+                    var predicted = terrain.pixel(x * 16 + col,z * 16 + row,64);
+                    String name = BuiltInRegistries.BLOCK.getKey(state.getBlock()).getPath();
+                    String group = state.getBlock() instanceof LeavesBlock ? "leaves" : name.contains("planks") || name.contains("stairs") || name.contains("cobblestone") || name.contains("path") || name.contains("slab") ? "buildings" : "other";
+                    var counts = groups.computeIfAbsent(group,ignored -> new int[3]);
+                    ++counts[0];
+                    if (predicted.height() == saved.heights()[index]) ++counts[1];
+                    if (predicted.height() == saved.heights()[index] && predicted.block().getBlock() == state.getBlock()) ++counts[2];
+                    else if (differences.size() < 16) {
+                        var difference = new JsonObject(); difference.addProperty("x",x * 16 + col); difference.addProperty("z",z * 16 + row);
+                        difference.addProperty("saved",name + "@" + saved.heights()[index]); difference.addProperty("predicted",BuiltInRegistries.BLOCK.getKey(predicted.block().getBlock()) + "@" + predicted.height()); differences.add(difference);
+                    }
+                }
+            }
+        } finally { for (var region : probe.regions.values()) region.close(); }
+        var result = new JsonObject(); result.addProperty("seed",Long.toString(seed));
+        groups.forEach((name,counts) -> { var group = new JsonObject(); group.addProperty("columns",counts[0]); group.addProperty("matchingHeights",counts[1]); group.addProperty("matchingSurfaceBlocks",counts[2]); result.add(name,group); });
+        result.add("differences",differences); result.addProperty("scope","seed-generated decoration compared with saved-world surface columns, including leaves and buildings");
         return result;
     }
 

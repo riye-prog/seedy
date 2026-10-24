@@ -149,10 +149,11 @@ public final class Workbench implements AutoCloseable {
         String cityFilter = dimension.equals("the_end") && !target.isEmpty() ? layer == 1 ? "with_elytra" : layer == 2 ? "without_elytra" : "any" : "any";
         Integer salt = null; miniWarning = "";
         if (!target.isEmpty()) try { salt = checkedPlacementSalt(target); } catch (IllegalArgumentException conflict) { miniWarning = conflict.getMessage(); }
-        String key = seed + dimension + x + ":" + z + ":" + step + ":" + extent + target + cityFilter + salt + miniWarning;
+        int surfaceY = dimension.equals("the_nether") ? Math.clamp(Math.floorDiv(client.player.getBlockY(),8) * 8 + 7,-64,127) : 64;
+        String key = seed + dimension + x + ":" + z + ":" + step + ":" + extent + ":" + surfaceY + target + cityFilter + salt + miniWarning;
         if (key.equals(miniKey)) return;
         miniKey = key;
-        miniMap.request(new SeedMap.Request(++miniRequest,Long.parseLong(seed),dimension,64,step,x - extent,z - extent,x + extent,z + extent,target,cityFilter,salt,miniWarning.isEmpty(),miniWarning,true));
+        miniMap.request(new SeedMap.Request(++miniRequest,Long.parseLong(seed),dimension,surfaceY,step,x - extent,z - extent,x + extent,z + extent,target,cityFilter,salt,miniWarning.isEmpty(),miniWarning,true,true).withDecorationRules(mapDecorationRules()));
     }
     public boolean structureRecoveryRunning() { return recovery.running(); }
     public boolean recovering() { return anyRecoveryRunning(); }
@@ -385,7 +386,7 @@ public final class Workbench implements AutoCloseable {
                     String warning = "";
                     if (!target.isEmpty()) try { placementSalt = checkedPlacementSalt(target); }
                     catch (IllegalArgumentException conflict) { warning = conflict.getMessage(); }
-                    seedMap.request(new SeedMap.Request(body.get("id").getAsLong(), Long.parseLong(seed), body.get("dimension").getAsString(), body.get("y").getAsInt(), body.get("step").getAsInt(), body.get("minX").getAsInt(), body.get("minZ").getAsInt(), body.get("maxX").getAsInt(), body.get("maxZ").getAsInt(), target, body.get("cityFilter").getAsString(), placementSalt, warning.isEmpty(), warning, body.has("relief") && body.get("relief").getAsBoolean()));
+                    seedMap.request(new SeedMap.Request(body.get("id").getAsLong(), Long.parseLong(seed), body.get("dimension").getAsString(), body.get("y").getAsInt(), body.get("step").getAsInt(), body.get("minX").getAsInt(), body.get("minZ").getAsInt(), body.get("maxX").getAsInt(), body.get("maxZ").getAsInt(), target, body.get("cityFilter").getAsString(), placementSalt, warning.isEmpty(), warning, body.has("relief") && body.get("relief").getAsBoolean(),body.has("terrain") && body.get("terrain").getAsBoolean()).withDecorationRules(mapDecorationRules()));
                     mapVisible = true;
                 }
                 case "mapStop" -> stopMap();
@@ -494,6 +495,13 @@ public final class Workbench implements AutoCloseable {
             cancelSearch();
             seedMap.reset(); miniMap.reset(); miniKey = "";
         }));
+    }
+
+    private SeedDecorationRules mapDecorationRules() {
+        var blocked = new java.util.HashSet<String>();
+        for (String target : rules.keySet()) try { checkedPlacementSalt(target); }
+        catch (IllegalArgumentException conflict) { blocked.add(target); }
+        return new SeedDecorationRules(paperSalts,blocked);
     }
 
     private Integer checkedPlacementSalt(String target) {

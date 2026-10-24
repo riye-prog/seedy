@@ -111,6 +111,11 @@ public final class Locator implements AutoCloseable {
         return world.generator().getBaseHeight(x, z, net.minecraft.world.level.levelgen.Heightmap.Types.OCEAN_FLOOR_WG, world.height(), world.placements().randomState());
     }
 
+    StructureWorld mapWorld(long seed, String dimension) {
+        mapBiomes(seed,dimension);
+        return structureWorlds.get(dimension);
+    }
+
     List<Result> mapStructures(long seed, String target, int tileX, int tileZ, String dimension, String cityFilter) {
         return mapStructures(seed, target, tileX, tileZ, dimension, cityFilter, null);
     }

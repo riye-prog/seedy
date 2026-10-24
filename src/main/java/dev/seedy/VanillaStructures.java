@@ -25,9 +25,12 @@ final class VanillaStructures implements AutoCloseable {
     private final StructureTemplateManager templates;
     RegistryAccess registries() { return registries; }
     StructureTemplateManager templates() { return templates; }
+    net.minecraft.world.level.levelgen.structure.pieces.StructurePieceSerializationContext serializationContext() {
+        return new net.minecraft.world.level.levelgen.structure.pieces.StructurePieceSerializationContext(resources,registries,templates);
+    }
 
     VanillaStructures(RegistryAccess worldRegistries) {
-        registries = new RegistryAccess.ImmutableRegistryAccess(java.util.stream.Stream.concat(RegistryAccess.fromRegistryOfRegistries(BuiltInRegistries.REGISTRY).registries(), worldRegistries.registries()));
+        registries = new RegistryAccess.ImmutableRegistryAccess(java.util.stream.Stream.concat(RegistryAccess.fromRegistryOfRegistries(BuiltInRegistries.REGISTRY).registries().filter(entry -> worldRegistries.lookup(entry.key()).isEmpty()), worldRegistries.registries()));
         try {
             directory = Files.createTempDirectory("seedy-structure-templates-");
             storage = LevelStorageSource.createDefault(directory).createAccess("templates");

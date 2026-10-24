@@ -13,14 +13,22 @@ import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
 
 public final class SeedMap implements AutoCloseable {
-    public record Request(long id, long seed, String dimension, int y, int step, int minX, int minZ, int maxX, int maxZ, String target, String cityFilter, Integer paperSalt, boolean structuresAllowed, String warning, boolean relief) {
+    public record Request(long id, long seed, String dimension, int y, int step, int minX, int minZ, int maxX, int maxZ, String target, String cityFilter, Integer paperSalt, boolean structuresAllowed, String warning, boolean relief, boolean terrain, SeedDecorationRules decorationRules) {
+        public Request(long id, long seed, String dimension, int y, int step, int minX, int minZ, int maxX, int maxZ, String target, String cityFilter, Integer paperSalt, boolean structuresAllowed, String warning, boolean relief, boolean terrain) {
+            this(id,seed,dimension,y,step,minX,minZ,maxX,maxZ,target,cityFilter,paperSalt,structuresAllowed,warning,relief,terrain,SeedDecorationRules.VANILLA);
+        }
+        Request withDecorationRules(SeedDecorationRules rules) { return new Request(id,seed,dimension,y,step,minX,minZ,maxX,maxZ,target,cityFilter,paperSalt,structuresAllowed,warning,relief,terrain,rules); }
         public Request(long id, long seed, String dimension, int y, int step, int minX, int minZ, int maxX, int maxZ, String target, String cityFilter) {
-            this(id, seed, dimension, y, step, minX, minZ, maxX, maxZ, target, cityFilter, null, true, "", false);
+            this(id, seed, dimension, y, step, minX, minZ, maxX, maxZ, target, cityFilter, null, true, "", false, false);
         }
         public Request(long id, long seed, String dimension, int y, int step, int minX, int minZ, int maxX, int maxZ, String target, String cityFilter, Integer paperSalt, boolean structuresAllowed, String warning) {
-            this(id, seed, dimension, y, step, minX, minZ, maxX, maxZ, target, cityFilter, paperSalt, structuresAllowed, warning, false);
+            this(id, seed, dimension, y, step, minX, minZ, maxX, maxZ, target, cityFilter, paperSalt, structuresAllowed, warning, false, false);
+        }
+        public Request(long id, long seed, String dimension, int y, int step, int minX, int minZ, int maxX, int maxZ, String target, String cityFilter, Integer paperSalt, boolean structuresAllowed, String warning, boolean relief) {
+            this(id,seed,dimension,y,step,minX,minZ,maxX,maxZ,target,cityFilter,paperSalt,structuresAllowed,warning,relief,false);
         }
         public Request {
+            if (decorationRules == null) decorationRules = SeedDecorationRules.VANILLA;
             if (!List.of("overworld", "the_nether", "the_end").contains(dimension) || y < -64 || y > 320 || step < 1 || step > 65536 || (step & (step - 1)) != 0) throw new IllegalArgumentException("Invalid map settings.");
             if (minX > maxX || minZ > maxZ || Math.abs((long)minX) > 29_970_000 || Math.abs((long)maxX) > 29_970_000 || Math.abs((long)minZ) > 29_970_000 || Math.abs((long)maxZ) > 29_970_000) throw new IllegalArgumentException("Keep the map inside world bounds.");
             if (tiles(minX, minZ, maxX, maxZ, step * 32).size() > 512) throw new IllegalArgumentException("Too many map tiles.");
@@ -31,24 +39,32 @@ public final class SeedMap implements AutoCloseable {
 
     }
     record TilePos(int x, int z) { }
-    record BiomeKey(long seed, String dimension, int y, int step, TilePos position, boolean relief) { }
+    record BiomeKey(long seed, String dimension, int y, int step, TilePos position, boolean relief, boolean terrain, SeedDecorationRules decorationRules) { }
     record StructureKey(long seed, String dimension, String target, String cityFilter, Integer paperSalt, TilePos position) { }
-    record Tile(int x, int z, List<Integer> runs, List<Integer> heights, long version) {
-        Tile(int x, int z, List<Integer> runs, List<Integer> heights) { this(x, z, runs, heights, TILE_VERSIONS.incrementAndGet()); }
+    record Tile(int x, int z, List<Integer> runs, List<Integer> heights, String pixels, String water, String quality, int resolution, long version) {
+        Tile(int x, int z, List<Integer> runs, List<Integer> heights) { this(x, z, runs, heights, "", "", "biomes", 32, TILE_VERSIONS.incrementAndGet()); }
         Tile(int x, int z, List<Integer> runs) { this(x, z, runs, List.of()); }
+        Tile(int x, int z, SeedTerrain.Surface surface) { this(x,z,surface.runs(),List.of(),surface.pixels(),surface.water(),surface.detailed() ? "surface" : "overview",surface.resolution(),TILE_VERSIONS.incrementAndGet()); }
     }
     record HeightKey(long seed, int x, int z) { }
+    record TerrainWorldKey(long seed, String dimension, SeedDecorationRules decorationRules) { }
     private static final class SearchProgressHolder { boolean partial; }
     record Swatch(String name, int color) { }
     private static final Gson JSON = new Gson();
     private static final java.util.concurrent.atomic.AtomicLong TILE_VERSIONS = new java.util.concurrent.atomic.AtomicLong();
     private static final class Shared {
         final ExecutorService worker = Executors.newSingleThreadExecutor(dev.seedy.recovery.RecoveryWorkload.threads("Seedy map"));
-        final Map<BiomeKey, Tile> biomeCache = boundedCache(1024);
+        final Map<BiomeKey, Tile> biomeCache = boundedCache(512);
         final Map<StructureKey, List<Locator.Result>> structureCache = boundedCache(256);
         final Map<String, List<Swatch>> palettes = new LinkedHashMap<>();
         final Map<HeightKey, Integer> heightCache = boundedCache(16384);
-        final Map<Long, com.google.gson.JsonElement> encodedTiles = boundedCache(2048);
+        final Map<Long, com.google.gson.JsonElement> encodedTiles = boundedCache(512);
+        final Map<TerrainWorldKey, SeedTerrain> terrainCache = new LinkedHashMap<>(3,0.75f,true) {
+            @Override protected boolean removeEldestEntry(Map.Entry<TerrainWorldKey,SeedTerrain> entry) {
+                if (size() <= 2) return false;
+                entry.getValue().close(); return true;
+            }
+        };
         Locator locator;
     }
     private final Shared shared;
@@ -131,7 +147,7 @@ public final class SeedMap implements AutoCloseable {
             var missing = new ArrayList<BiomeKey>();
             var missingStructures = new ArrayList<StructureKey>();
             for (var position : positions) {
-                var key = new BiomeKey(request.seed(), request.dimension(), request.y(), request.step(), position, request.relief());
+                var key = new BiomeKey(request.seed(), request.dimension(), request.y(), request.step(), position, request.relief(), request.terrain(), request.terrain() ? request.decorationRules() : SeedDecorationRules.VANILLA);
                 var tile = shared.biomeCache.get(key);
                 if (tile == null) missing.add(key); else completed.add(tile);
             }
@@ -140,23 +156,34 @@ public final class SeedMap implements AutoCloseable {
                 var found = shared.structureCache.get(key);
                 if (found == null) missingStructures.add(key); else markers.addAll(found);
             }
-            boolean shade = request.relief() && request.dimension().equals("overworld") && request.y() >= 48;
+            boolean surface = request.terrain() && (!request.dimension().equals("overworld") || request.y() >= 48);
+            boolean shade = !surface && request.relief() && request.dimension().equals("overworld") && request.y() >= 48;
             int tileOffset = completed.size();
-            remaining = missing.size() * (shade ? 2 : 1) + missingStructures.size() + (request.showStructures() && request.overviewStructures() ? 1 : 0);
+            remaining = missing.size() * (shade || surface ? 2 : 1) + missingStructures.size() + (request.showStructures() && request.overviewStructures() ? 1 : 0);
             publish(request, token, palette, completed, markers, remaining, "");
             var sampler = shared.locator.mapBiomes(request.seed(), request.dimension());
             long published = System.nanoTime();
             for (var key : missing) {
                 check(token);
-                var baseKey = new BiomeKey(request.seed(), request.dimension(), request.y(), request.step(), key.position(), false);
+                var baseKey = new BiomeKey(request.seed(), request.dimension(), request.y(), request.step(), key.position(), false, false, SeedDecorationRules.VANILLA);
                 var tile = shared.biomeCache.get(baseKey);
                 if (tile == null) { tile = sample(sampler, palette, key.position(), request.y(), request.step()); shared.biomeCache.put(baseKey, tile); }
-                if (!shade) shared.biomeCache.put(key, tile);
+                if (!shade && !surface) shared.biomeCache.put(key, tile);
                 completed.add(tile);
                 remaining--;
                 if (System.nanoTime() - published > 150_000_000 || remaining == 0) { publish(request, token, palette, completed, markers, remaining, ""); published = System.nanoTime(); }
             }
             publish(request, token, palette, completed, markers, remaining, "");
+            if (surface && !missing.isEmpty()) {
+                var terrain = shared.terrainCache.computeIfAbsent(new TerrainWorldKey(request.seed(),request.dimension(),request.decorationRules()),ignored -> new SeedTerrain(shared.locator.mapWorld(request.seed(),request.dimension()),request.seed(),WorldgenAdapter.registries(),sampler,request.decorationRules()));
+                for (int index = 0; index < missing.size(); ++index) {
+                    check(token);
+                    var key = missing.get(index);
+                    var tile = new Tile(key.position().x(),key.position().z(),terrain.tile(key.position(),request.step(),request.y(),request.relief(),palette));
+                    shared.biomeCache.put(key,tile); completed.set(tileOffset + index,tile); --remaining;
+                    if (index == 0 || System.nanoTime() - published > 150_000_000 || remaining == 0) { publish(request,token,palette,completed,markers,remaining,""); published = System.nanoTime(); }
+                }
+            }
             for (var key : missingStructures) {
                 check(token);
                 var found = shared.locator.mapStructures(request.seed(), request.target(), key.position().x(), key.position().z(), request.dimension(), request.cityFilter(), request.paperSalt());
@@ -208,6 +235,10 @@ public final class SeedMap implements AutoCloseable {
     private void publish(Request request, long token, List<Swatch> palette, List<Tile> tiles, List<Locator.Result> markers, int remaining, String error) {
         synchronized (this) { if (token != generation || Thread.currentThread().isInterrupted()) return; }
         var next = JSON.toJsonTree(request).getAsJsonObject();
+        if (request.terrain() && !request.decorationRules().blocked().isEmpty()) {
+            String hidden = "Buildings with conflicting placement settings are hidden: " + String.join(", ",request.decorationRules().blocked().stream().sorted().map(name -> name.replace("minecraft:","")).toList());
+            next.addProperty("warning",request.warning().isEmpty() ? hidden : request.warning() + " " + hidden);
+        }
         next.addProperty("seed", Long.toString(request.seed()));
         next.addProperty("remaining", remaining);
         next.addProperty("structuresVisible", request.showStructures());
@@ -232,14 +263,14 @@ public final class SeedMap implements AutoCloseable {
         base.addProperty("seed",Long.toString(request.seed()));
         base.addProperty("revision",snapshot.get("revision").getAsLong());
         base.addProperty("partial",true);
-        for (String field : List.of("palette","remaining","structuresVisible","overviewStructures","error")) base.add(field,snapshot.get(field));
+        for (String field : List.of("palette","remaining","structuresVisible","overviewStructures","error","warning")) base.add(field,snapshot.get(field));
         var batch = new com.google.gson.JsonArray();
         boolean sent = false;
         for (var tile : tiles) {
             var position = new TilePos(tile.x(),tile.z());
             if (publishedTiles.getOrDefault(position,0L) == tile.version()) continue;
             batch.add(shared.encodedTiles.get(tile.version())); publishedTiles.put(position,tile.version());
-            if (batch.size() == 4) { base.add("tiles",batch); enqueue(base.toString(),token); batch = new com.google.gson.JsonArray(); sent = true; }
+            if (batch.size() == 4 || tile.resolution() > 32) { base.add("tiles",batch); enqueue(base.toString(),token); batch = new com.google.gson.JsonArray(); sent = true; }
         }
         if (!batch.isEmpty()) { base.add("tiles",batch); enqueue(base.toString(),token); sent = true; }
         if (!sent || publishedMarkers != markerCount) {
@@ -324,5 +355,5 @@ public final class SeedMap implements AutoCloseable {
         };
     }
 
-    @Override public synchronized void close() { stop(); if (!owner) return; shared.worker.submit(() -> { if (shared.locator != null) shared.locator.close(); shared.biomeCache.clear(); shared.structureCache.clear(); shared.heightCache.clear(); }); shared.worker.shutdown(); }
+    @Override public synchronized void close() { stop(); if (!owner) return; shared.worker.submit(() -> { if (shared.locator != null) shared.locator.close(); shared.terrainCache.values().forEach(SeedTerrain::close); shared.terrainCache.clear(); shared.biomeCache.clear(); shared.structureCache.clear(); shared.heightCache.clear(); }); shared.worker.shutdown(); }
 }
