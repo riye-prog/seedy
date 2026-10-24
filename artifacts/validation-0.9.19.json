@@ -1,0 +1,112 @@
+{
+  "version": "0.9.19",
+  "mcopt": {
+    "release": "0.3.0-alpha.2",
+    "url": "https://github.com/noahdunnagan/mcopt/releases/tag/v0.3.0-alpha.2",
+    "jar_sha256": "72e12a907c85371cce3045a798b0fbcac88c31b0f1fbc9bf8f6dfa99f2cacfe3",
+    "minecraft": "26.3",
+    "platform": "apple silicon macos 26 or later",
+    "minimum_fabric_loader": "0.19.5"
+  },
+  "minecraft": {
+    "26.2": {
+      "jar": "seedy-0.9.19+26.2.jar",
+      "bytes": 38130486,
+      "sha256": "26b4d29d52f9236f7cc736a0ca7eb10f299e67c72c9b80d59474fed26c1d86a9",
+      "java_tests_passed": 71,
+      "failed_or_skipped": 0,
+      "native_files": 16,
+      "solver_binaries_unchanged": true
+    },
+    "26.3": {
+      "jar": "seedy-0.9.19+26.3.jar",
+      "bytes": 38129693,
+      "sha256": "05725cbf5ae45590f9446753122b11f5bdf448841b610bbb43398f69aad6136f",
+      "java_tests_passed": 70,
+      "failed_or_skipped": 0,
+      "native_files": 16,
+      "solver_binaries_unchanged": true
+    }
+  },
+  "native_sha256": {
+    "natives/macos-arm64/libseedycrack.dylib": "078d9e021a34c9e694ab28f7aa0c0a7f1a2d8ceb5cdc8e67e4fb33d292ea0763",
+    "natives/macos-arm64/libseedynether.dylib": "dae4efeeebc044f6aa8428e3c5dda04d635c327dcf97dbcb2f287b2879f98dac",
+    "natives/macos-arm64/libz3.dylib": "31123abc706af7785f2e8c1ac0fdffb521d07216333b12fe81ac37f22864ffb9",
+    "natives/macos-universal/libseedy.dylib": "851af28aec99953fa48b25c0e7115de1ec72d7c4c8fc0459539d4f3fa9fc6a61",
+    "natives/macos-x86_64/libseedycrack.dylib": "bf69f65e3e895f477975758c54d76431fe27a2b18860f80f71bedeedbeecfcfb",
+    "natives/macos-x86_64/libseedynether.dylib": "0f5241d8707fc9e9836c90e4ee5d26d84a2449ba17f637777e408ce388b419bc",
+    "natives/macos-x86_64/libz3.dylib": "78686e3843d72e0eee7073edc0b3ccb87dbf84fdf04658bafe296ebc6ca7eb4e",
+    "natives/windows-x86_64/libgcc_s_seh-1.dll": "d7e343dd266747177c3699bc3201ea36eceef158e98530e089263bc55bb2a6d7",
+    "natives/windows-x86_64/libgmp-10.dll": "37248cda33845e7c5c35a574e57da762dd0a8268f0270d179f30a33746809681",
+    "natives/windows-x86_64/libgomp-1.dll": "2b5d851adc50f14a824a6de902d61ab67fbaee70dfe131850af842049a5612ee",
+    "natives/windows-x86_64/libstdc++-6.dll": "494bd9045948198ef4d3bc838c7362d4cfd49c890b439c096b1817aa7c7fa6ff",
+    "natives/windows-x86_64/libwinpthread-1.dll": "72bf8802de3a99d28f0bc2db9a11f281a9f9f3fa83dab2bc67e69fac3bd3d9c0",
+    "natives/windows-x86_64/libz3.dll": "bfa77e7ad5c1d9015043eafa71e034a68b570a13c2749d1aa8b6e37bbbb67131",
+    "natives/windows-x86_64/seedy.dll": "1eda32086d1093a5a9a77c7b8d2b20efd45ac7d382549a22f9cf92e3bffa837a",
+    "natives/windows-x86_64/seedycrack.dll": "c477d60eabe507b0aa60b7841a58e08c49be2800baa51e85b16e1684edc744d5",
+    "natives/windows-x86_64/seedynether.dll": "faa86b997c70c7546be3b85442db4769817ffb4beac0c95dad613d0e66f6754d"
+  },
+  "loader_probes": {
+    "mcopt-loader-26.3-false": {
+      "mcopt": false,
+      "fabric_mixin_application": true,
+      "minecraft_main_invoked": false
+    },
+    "mcopt-loader-26.3-true": {
+      "mcopt": true,
+      "fabric_mixin_application": true,
+      "minecraft_main_invoked": false
+    },
+    "mcopt-loader-26.2-false": {
+      "mcopt": false,
+      "fabric_mixin_application": true,
+      "minecraft_main_invoked": false
+    }
+  },
+  "metal_render_probe": {
+    "width": 1440,
+    "scope": "actual released mcopt native library and Seedy JNI renderer; no Minecraft instance launched; not an in-game FPS measurement",
+    "height": 1000,
+    "jni_cpu_median_ms": 0.018417,
+    "mcopt": "0.3.0-alpha.2",
+    "one_mcopt_command_buffer_per_frame": true,
+    "frames": [
+      {
+        "image": "seedy-0.9.19-mcopt-hud.png",
+        "changed_pixels": 62000,
+        "panel": false,
+        "hud": true,
+        "frames": 120,
+        "raw_sha256": "ebfc609d0f2f677f05ea735c2cec67d4a5ee5e657973e5135ea3592afc3a474c",
+        "png_sha256": "af93092950df2b439dde26037ff4887ebe86ab85328727404444273b8b893006"
+      },
+      {
+        "image": "seedy-0.9.19-mcopt-panel.png",
+        "changed_pixels": 790256,
+        "panel": true,
+        "hud": false,
+        "frames": 8,
+        "raw_sha256": "f85567d1267f15555f9c36b2d31b936f577e831212d02d51d2afdaf38b8e2a0c",
+        "png_sha256": "3689ccb0e1d09aac0db19c699a1bab633d901f73c73e1a1ee2f47a45c328844f"
+      },
+      {
+        "image": "seedy-0.9.19-mcopt-outlines.png",
+        "changed_pixels": 2991,
+        "panel": false,
+        "hud": false,
+        "frames": 8,
+        "raw_sha256": "dc06b0bfcf198c0e0678d9747aa8fa20d03eb984d14af61e6ba1ea7a965079d0",
+        "png_sha256": "72a0166ee04c4ed3d9adecd2f3f0c3efdcddcdfd90172f912b03fb7afe6b4b53"
+      }
+    ],
+    "in_flight": 2,
+    "device": "Apple M3"
+  },
+  "native_interaction_checks": "passed",
+  "native_builds": {
+    "macos": "universal arm64 and x86_64; ad hoc signature verified",
+    "windows": "x86_64 cross-compiled; Windows runtime not tested"
+  },
+  "scope": "command-line Fabric transformation, actual released mcopt library and Seedy JNI Metal GPU readback, Java and native interaction tests; Minecraft main never invoked; live gameplay and FPS not measured",
+  "source_commit": "07d83578947fd9fac927fcefb9bc91388ada9215"
+}
