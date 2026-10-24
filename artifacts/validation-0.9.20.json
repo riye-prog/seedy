@@ -1,0 +1,142 @@
+{
+  "version": "0.9.20",
+  "source_commit": "a8c60b6c76a9a96a19f7e67890200a1602bbafea",
+  "minecraft": {
+    "26.2": {
+      "tests": 80,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 1
+    },
+    "26.3": {
+      "tests": 79,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 1
+    }
+  },
+  "jars": {
+    "seedy-0.9.20+26.2.jar": {
+      "bytes": 38148984,
+      "sha256": "805a247b8bba8befd1d58a171a75771c1eada910df4103baef4de9236310ebd6"
+    },
+    "seedy-0.9.20+26.3.jar": {
+      "bytes": 38148191,
+      "sha256": "34ab1c4781e20668835ede5948da2eb0c586852c07675362dcc116620b04dc07"
+    }
+  },
+  "native_builds": [
+    "macos-arm64",
+    "macos-x86_64",
+    "windows-x86_64"
+  ],
+  "native_runtime_checks": {
+    "obc_constraints_kernel_scheduling": {
+      "macos-arm64": "3 passed",
+      "macos-x86_64": "3 passed"
+    },
+    "nbc": {
+      "arm": [
+        {
+          "cancel_attempt": 1,
+          "stop_ms": 4.59
+        },
+        {
+          "cancel_attempt": 2,
+          "stop_ms": 5.07
+        },
+        {
+          "cancel_attempt": 3,
+          "stop_ms": 3.62
+        },
+        {
+          "observations": 36,
+          "result": 1,
+          "seed": 765906787396911863,
+          "matches": true,
+          "seconds": 164.27
+        }
+      ],
+      "intel": [
+        {
+          "cancel_attempt": 1,
+          "stop_ms": 5.12
+        },
+        {
+          "cancel_attempt": 2,
+          "stop_ms": 0.1
+        },
+        {
+          "cancel_attempt": 3,
+          "stop_ms": 0.29
+        },
+        {
+          "observations": 36,
+          "result": 1,
+          "seed": 765906787396911863,
+          "matches": true,
+          "seconds": 166.81
+        }
+      ]
+    }
+  },
+  "loader_probes": {
+    "26.2-vulkan": "passed",
+    "26.3-vulkan": "passed",
+    "26.3-mcopt-0.3.0-alpha.2": "passed",
+    "minecraft_main_invoked": false
+  },
+  "overworld_replay": {
+    "input": "1000 captured paper 26.2 anti-xray mode 1 chunks",
+    "observations": 2101744,
+    "expected_seed": "-7619526468459309251",
+    "solver_input": "block observations and seed hash; the solver was not supplied the seed",
+    "baseline_scope": "v0.9.19 native library with the same Java probe, stopped after 30 seconds",
+    "baseline": {
+      "limited": false,
+      "seconds": 30.085573625,
+      "hashVerified": false,
+      "frames": 3536,
+      "p95FrameDelayMs": 6.766087,
+      "p99FrameDelayMs": 13.595436,
+      "maxFrameDelayMs": 98.425754,
+      "threadsStarted": 1200,
+      "minimumDuty": 100,
+      "stopMs": 71.288583
+    },
+    "updated": {
+      "limited": true,
+      "seconds": 535.02758075,
+      "hashVerified": true,
+      "frames": 64031,
+      "p95FrameDelayMs": 1.650127,
+      "p99FrameDelayMs": 2.211553,
+      "maxFrameDelayMs": 187.431094,
+      "first30sP95DelayMs": 1.664713,
+      "first30sP99DelayMs": 9.0497,
+      "first30sThreads": 2,
+      "threadsStarted": 5,
+      "minimumDuty": 35,
+      "stopMs": 0.028375,
+      "nativeAttachments": 4,
+      "workers": 4
+    },
+    "fps_scope": "simulated foreground loop, not live Minecraft rendering"
+  },
+  "throttled_obc_stop_ms": [
+    5,
+    101,
+    59
+  ],
+  "macos_worker_priority": {
+    "java_priority": 3,
+    "native_applied": true,
+    "qos_class": 17
+  },
+  "scope": [
+    "both jars contain all 16 native payloads; six solver payloads updated",
+    "GUI native payloads unchanged",
+    "Windows runtime validation remains CI/tester work",
+    "no Minecraft instance launched"
+  ]
+}
