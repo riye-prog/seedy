@@ -18,8 +18,12 @@ thread_local! { static SLICE: Cell<Instant> = Cell::new(Instant::now()); }
 fn background_priority() {
     #[cfg(target_os = "macos")]
     unsafe {
-        extern "C" { fn pthread_set_qos_class_self_np(class: u32, priority: i32) -> i32; }
-        pthread_set_qos_class_self_np(17,0);
+        extern "C" {
+            fn pthread_set_qos_class_self_np(class: u32, priority: i32) -> i32;
+            fn qos_class_self() -> u32;
+        }
+        let qos = qos_class_self();
+        if qos != 0 { pthread_set_qos_class_self_np(qos,-15); }
     }
     #[cfg(target_os = "windows")]
     unsafe {
@@ -135,7 +139,7 @@ pub unsafe extern "C" fn seedy_nether_crack(
     let (channel, receiver) = channel();
     search_bedrock_pattern(
         &blocks,
-        threads.clamp(1, 4),
+        threads.clamp(1, 6),
         BedrockGeneration::Normal,
         OutputMode::StructureSeed,
         ProgressSender { channel },

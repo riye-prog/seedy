@@ -11,7 +11,7 @@ public final class RecoveryWorkload {
     private static long frameStarted;
 
     public static int workerCount() { return workersFor(Runtime.getRuntime().availableProcessors()); }
-    public static int workersFor(int processors) { return Math.clamp(processors / 2,1,4); }
+    public static int workersFor(int processors) { return Math.clamp(processors - 2,1,6); }
     public static int dutyPercent() { return BUDGET.dutyPercent(System.nanoTime()); }
     public static void active(boolean value) { BUDGET.active(value); }
     public static void frameStarted() { frameStarted = System.nanoTime(); }

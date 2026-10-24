@@ -11,8 +11,9 @@ class RecoveryWorkloadTest {
         assertEquals(1,RecoveryWorkload.workersFor(1));
         assertEquals(1,RecoveryWorkload.workersFor(2));
         assertEquals(2,RecoveryWorkload.workersFor(4));
-        assertEquals(4,RecoveryWorkload.workersFor(8));
-        assertEquals(4,RecoveryWorkload.workersFor(128));
+        assertEquals(4,RecoveryWorkload.workersFor(6));
+        assertEquals(6,RecoveryWorkload.workersFor(8));
+        assertEquals(6,RecoveryWorkload.workersFor(128));
     }
 
     @Test void workersHaveTheirOwnLowPriorityAndStopWhileYielding() throws Exception {

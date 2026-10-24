@@ -78,7 +78,13 @@ public final class RecoveryResponsivenessProbe {
                 catch (Throwable error) { failure.set(error); }
             };
             var worker = limited ? RecoveryWorkload.threads("probe-recovery").newThread(solve) : Thread.ofPlatform().name("probe-baseline").unstarted(solve);
-            for (int i = 0; i < 100; i++) frame();
+            long warmup = System.nanoTime();
+            for (int i = 0; i < 100; i++) {
+                frame();
+                warmup += 8_333_333;
+                long pause = warmup - System.nanoTime();
+                if (pause > 0) LockSupport.parkNanos(pause);
+            }
             RecoveryWorkload.active(limited);
             var bean = ManagementFactory.getThreadMXBean();
             long threadsBefore = bean.getTotalStartedThreadCount();
@@ -89,6 +95,7 @@ public final class RecoveryResponsivenessProbe {
             var firstWindow = new ArrayList<Long>();
             long firstWindowThreads = 0;
             int minimumDuty = 100;
+            long dutySum = 0, dutySamples = 0, lastLog = started;
             worker.start();
             while (worker.isAlive() && System.nanoTime() < deadline) {
                 long now = System.nanoTime();
@@ -100,7 +107,13 @@ public final class RecoveryResponsivenessProbe {
                 if (limited) {
                     int duty = RecoveryWorkload.dutyPercent();
                     minimumDuty = Math.min(minimumDuty,duty);
+                    dutySum += duty;
+                    dutySamples++;
                     nativeBudget.invokeExact(duty,RecoveryWorkload.workerCount());
+                }
+                if (now - lastLog >= 15_000_000_000L) {
+                    System.out.println("probe seconds=" + (now - started) / 1_000_000_000L + " averageDuty=" + (dutySamples == 0 ? 100 : dutySum / dutySamples));
+                    lastLog = now;
                 }
                 next += 8_333_333;
                 if (System.nanoTime() - next > 50_000_000) next = System.nanoTime();
@@ -127,6 +140,7 @@ public final class RecoveryResponsivenessProbe {
             result.addProperty("first30sThreads",firstWindowThreads == 0 ? bean.getTotalStartedThreadCount() - threadsBefore : firstWindowThreads);
             result.addProperty("threadsStarted",bean.getTotalStartedThreadCount() - threadsBefore);
             result.addProperty("minimumDuty",minimumDuty);
+            result.addProperty("averageDuty",dutySamples == 0 ? 100 : (double)dutySum / dutySamples);
             result.addProperty("stopMs",stopNanos / 1e6);
             if (limited) {
                 var attached = linker.downcallHandle(symbols.findOrThrow("seedy_recovery_attachments"),FunctionDescriptor.of(ValueLayout.JAVA_LONG));

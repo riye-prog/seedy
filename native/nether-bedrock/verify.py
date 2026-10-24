@@ -22,7 +22,7 @@ library.seedy_nether_crack.argtypes = [ctypes.POINTER(ctypes.c_int32), ctypes.c_
 library.seedy_nether_crack.restype = ctypes.c_int64
 blocks = (ctypes.c_int32 * len(entries))(*entries)
 result = (ctypes.c_int64 * 1)()
-workers = min(4, max(1, (os.cpu_count() or 1) // 2))
+workers = min(6, max(1, (os.cpu_count() or 1) - 2))
 library.seedy_nether_budget(35)
 library.seedy_nether_reset()
 library.seedy_nether_cancel()
@@ -40,7 +40,7 @@ for attempt in range(3):
     assert cancelled_result == [-4], cancelled_result
     print(json.dumps({"cancel_attempt": attempt + 1, "stop_ms": round((time.monotonic() - stopped_at) * 1000, 2)}))
 library.seedy_nether_reset()
-library.seedy_nether_budget(int(sys.argv[2]) if len(sys.argv) > 2 else 85)
+library.seedy_nether_budget(int(sys.argv[2]) if len(sys.argv) > 2 else 100)
 started = time.monotonic()
 count = library.seedy_nether_crack(blocks, len(entries) // 4, workers, seed_hash, result)
 elapsed = round(time.monotonic() - started, 2)

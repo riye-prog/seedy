@@ -19,7 +19,10 @@ final class BackgroundThread {
             var linker = Linker.nativeLinker();
             var lookup = linker.defaultLookup();
             mac = os.contains("mac");
-            if (mac) lower = linker.downcallHandle(lookup.findOrThrow("pthread_set_qos_class_self_np"),FunctionDescriptor.of(JAVA_INT,JAVA_INT,JAVA_INT));
+            if (mac) {
+                lower = linker.downcallHandle(lookup.findOrThrow("pthread_set_qos_class_self_np"),FunctionDescriptor.of(JAVA_INT,JAVA_INT,JAVA_INT));
+                priority = linker.downcallHandle(lookup.findOrThrow("qos_class_self"),FunctionDescriptor.of(JAVA_INT));
+            }
             else if (os.contains("win")) {
                 lookup = SymbolLookup.libraryLookup("kernel32.dll",Arena.global());
                 current = linker.downcallHandle(lookup.findOrThrow("GetCurrentThread"),FunctionDescriptor.of(JAVA_LONG));
@@ -33,7 +36,10 @@ final class BackgroundThread {
     static boolean apply() {
         if (!available) return false;
         try {
-            if (mac) return (int)lower.invokeExact(17,0) == 0;
+            if (mac) {
+                int qos = (int)priority.invokeExact();
+                return qos != 0 && (int)lower.invokeExact(qos,-15) == 0;
+            }
             long thread = (long)current.invokeExact();
             int previous = (int)priority.invokeExact(thread);
             return previous <= -1 || (int)lower.invokeExact(thread,-1) != 0;

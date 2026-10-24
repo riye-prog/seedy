@@ -16,14 +16,15 @@ public final class FrameBudget {
 
     public void frame(long elapsed, long now) {
         if (elapsed <= 0) return;
+        long period = lastFrame == 0 || now <= lastFrame ? elapsed : Math.max(elapsed,now - lastFrame);
         lastFrame = now;
         if (!active) {
-            double sample = Math.clamp(elapsed,500_000L,50_000_000L);
+            double sample = Math.clamp(period,500_000L,250_000_000L);
             baseline = baseline == 0 ? sample : baseline + (sample - baseline) / 32;
             return;
         }
-        if (baseline == 0) baseline = Math.clamp(elapsed,500_000L,50_000_000L);
-        if (elapsed > Math.max(baseline * 1.3,baseline + 1_500_000)) {
+        if (baseline == 0) baseline = Math.clamp(period,500_000L,250_000_000L);
+        if (period > Math.max(baseline * 1.3,baseline + 1_500_000)) {
             pressure = Math.min(8,pressure + 1);
             healthyFrames = 0;
         } else if (++healthyFrames >= 12) {
@@ -35,6 +36,6 @@ public final class FrameBudget {
     public int dutyPercent(long now) {
         if (!active || lastFrame == 0) return 100;
         if (now - lastFrame > 250_000_000L || pressure >= 6) return 35;
-        return pressure >= 2 ? 60 : 85;
+        return pressure >= 2 ? 60 : 100;
     }
 }

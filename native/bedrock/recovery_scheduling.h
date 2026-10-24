@@ -14,18 +14,24 @@
 #endif
 
 inline std::atomic<unsigned int> recoveryDuty{100};
-inline std::atomic<unsigned int> recoveryWorkers{std::clamp(std::thread::hardware_concurrency() / 2,1u,4u)};
+inline unsigned int defaultRecoveryWorkers() {
+    unsigned int cores = std::thread::hardware_concurrency();
+    return std::clamp(cores > 2 ? cores - 2 : 1u,1u,6u);
+}
+
+inline std::atomic<unsigned int> recoveryWorkers{defaultRecoveryWorkers()};
 
 inline void setRecoveryBudget(unsigned int duty, unsigned int workers) {
     recoveryDuty.store(std::clamp(duty,1u,100u),std::memory_order_relaxed);
-    recoveryWorkers.store(std::clamp(workers,1u,4u),std::memory_order_relaxed);
+    recoveryWorkers.store(std::clamp(workers,1u,6u),std::memory_order_relaxed);
 }
 
 inline unsigned int recoveryWorkerCount() { return recoveryWorkers.load(std::memory_order_relaxed); }
 
 class RecoveryThreadPriority {
 #ifdef __APPLE__
-    qos_class_t previous = qos_class_self();
+    qos_class_t previous = QOS_CLASS_UNSPECIFIED;
+    int previousRelative = 0;
     bool changed = false;
 #elif defined(_WIN32)
     int previous = GetThreadPriority(GetCurrentThread());
@@ -34,14 +40,15 @@ class RecoveryThreadPriority {
 public:
     RecoveryThreadPriority() {
 #ifdef __APPLE__
-        if (previous == QOS_CLASS_UNSPECIFIED || previous > QOS_CLASS_UTILITY) changed = pthread_set_qos_class_self_np(QOS_CLASS_UTILITY,0) == 0;
+        if (pthread_get_qos_class_np(pthread_self(),&previous,&previousRelative) == 0 && previous != QOS_CLASS_UNSPECIFIED && previousRelative > QOS_MIN_RELATIVE_PRIORITY)
+            changed = pthread_set_qos_class_self_np(previous,QOS_MIN_RELATIVE_PRIORITY) == 0;
 #elif defined(_WIN32)
         if (previous > THREAD_PRIORITY_BELOW_NORMAL) changed = SetThreadPriority(GetCurrentThread(),THREAD_PRIORITY_BELOW_NORMAL) != 0;
 #endif
     }
     ~RecoveryThreadPriority() {
 #ifdef __APPLE__
-        if (changed) pthread_set_qos_class_self_np(previous == QOS_CLASS_UNSPECIFIED ? QOS_CLASS_DEFAULT : previous,0);
+        if (changed) pthread_set_qos_class_self_np(previous,previousRelative);
 #elif defined(_WIN32)
         if (changed) SetThreadPriority(GetCurrentThread(),previous);
 #endif
