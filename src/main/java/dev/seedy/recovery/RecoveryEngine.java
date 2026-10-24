@@ -13,9 +13,9 @@ import java.util.function.LongConsumer;
 import java.util.function.LongPredicate;
 
 public final class RecoveryEngine implements AutoCloseable {
-    private final int workerCount = Math.max(1, Math.min(6, Runtime.getRuntime().availableProcessors() - 2));
-    private final ExecutorService coordinator = Executors.newSingleThreadExecutor(Thread.ofPlatform().daemon().factory());
-    private final ExecutorService workers = Executors.newFixedThreadPool(workerCount, Thread.ofPlatform().daemon().factory());
+    private final int workerCount = RecoveryWorkload.workerCount();
+    private final ExecutorService coordinator = Executors.newSingleThreadExecutor(RecoveryWorkload.threads("seedy-structure-coordinator"));
+    private final ExecutorService workers = Executors.newFixedThreadPool(workerCount, RecoveryWorkload.threads("seedy-structure-worker"));
     private final AtomicLong generation = new AtomicLong();
     private final AtomicLong checked = new AtomicLong();
     private volatile long total;
@@ -41,7 +41,8 @@ public final class RecoveryEngine implements AutoCloseable {
         currentTask = coordinator.submit(() -> {
             activeTasks.incrementAndGet();
             var found = new AtomicReference<Long>();
-            BooleanSupplier cancelled = () -> generation.get() != task || found.get() != null || Thread.currentThread().isInterrupted();
+            BooleanSupplier stopped = () -> generation.get() != task || found.get() != null || Thread.currentThread().isInterrupted();
+            BooleanSupplier cancelled = () -> !RecoveryWorkload.checkpoint(stopped);
             var jobs = new ArrayList<Future<?>>();
             try {
                 if (cancelled.getAsBoolean()) return;

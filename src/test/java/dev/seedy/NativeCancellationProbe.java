@@ -22,6 +22,11 @@ public final class NativeCancellationProbe {
         Path library = Path.of(args[1]).toAbsolutePath();
         System.load(library.resolveSibling(System.getProperty("os.name").startsWith("Windows") ? "libz3.dll" : "libz3.dylib").toString());
         System.load(library.toString());
+        if (args.length > 3) {
+            var nativeBudget = java.lang.foreign.Linker.nativeLinker().downcallHandle(java.lang.foreign.SymbolLookup.loaderLookup().findOrThrow("seedy_recovery_budget"),java.lang.foreign.FunctionDescriptor.ofVoid(ValueLayout.JAVA_INT,ValueLayout.JAVA_INT));
+            try { nativeBudget.invokeExact(Integer.parseInt(args[3]),dev.seedy.recovery.RecoveryWorkload.workerCount()); }
+            catch (Throwable error) { throw new IllegalStateException(error); }
+        }
         byte[] data = Files.readAllBytes(Path.of(args[0]));
         ByteBuffer source = ByteBuffer.wrap(data);
         int[] entries = new int[data.length / 4];

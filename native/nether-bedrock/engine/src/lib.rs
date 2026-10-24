@@ -57,6 +57,7 @@ pub fn search_bedrock_pattern_with_list<S: Sender + 'static>(blocks: &[Block], t
         let floor_blocks = floor_blocks.clone();
 
         thread::spawn(move||{
+            sender.worker_started();
 
             flat_search(&chunk, roof_blocks, floor_blocks, sender);
         });
@@ -78,11 +79,12 @@ pub fn search_bedrock_pattern<S: Sender + 'static>(blocks: &[Block], thread_coun
         let sender = sender.clone();
 
         thread::spawn(move || {
+            sender.worker_started();
             while start_bits < end_bits {
-                if sender.cancelled() { return; }
+                if !sender.checkpoint() { return; }
                 let chunk_end = min(start_bits + CHUNK_SIZE, end_bits);
                 for upper_bits in (start_bits..chunk_end).step_by(1 << 12) {
-                    if upper_bits & ((1 << 23) - 1) == 0 && sender.cancelled() { return; }
+                    if upper_bits & ((1 << 23) - 1) == 0 && !sender.checkpoint() { return; }
                     checks.run_checks(upper_bits);
                 }
 

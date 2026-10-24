@@ -65,10 +65,13 @@ public final class SeedyClient implements ClientModInitializer {
                 else if (client.gui.screen() == null && client.level != null) client.gui.setScreen(new OverlayScreen());
             }
             while (hudToggle.consumeClick()) if (client.level != null) Workbench.INSTANCE.toggleHud();
-            if (client.level != null) COLLECTOR.tick(client.level, Workbench.INSTANCE);
+            if (client.level != null && !Workbench.INSTANCE.recovering()) COLLECTOR.tick(client.level, Workbench.INSTANCE);
             Workbench.INSTANCE.tick(client);
             BedrockRecovery.INSTANCE.tick(client);
             NetherBedrockRecovery.INSTANCE.tick(client);
+            dev.seedy.recovery.RecoveryWorkload.active(Workbench.INSTANCE.recovering());
+            BedrockRecovery.updateWorkBudget();
+            NetherBedrockRecovery.updateWorkBudget();
         });
         ClientPlayConnectionEvents.DISCONNECT.register((handler, client) -> {
             sessionHash = null;

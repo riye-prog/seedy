@@ -1,0 +1,40 @@
+package dev.seedy.recovery;
+
+public final class FrameBudget {
+    private volatile boolean active;
+    private volatile long lastFrame;
+    private volatile int pressure;
+    private double baseline;
+    private int healthyFrames;
+
+    public void active(boolean value) {
+        if (active == value) return;
+        pressure = 0;
+        healthyFrames = 0;
+        active = value;
+    }
+
+    public void frame(long elapsed, long now) {
+        if (elapsed <= 0) return;
+        lastFrame = now;
+        if (!active) {
+            double sample = Math.clamp(elapsed,500_000L,50_000_000L);
+            baseline = baseline == 0 ? sample : baseline + (sample - baseline) / 32;
+            return;
+        }
+        if (baseline == 0) baseline = Math.clamp(elapsed,500_000L,50_000_000L);
+        if (elapsed > Math.max(baseline * 1.3,baseline + 1_500_000)) {
+            pressure = Math.min(8,pressure + 1);
+            healthyFrames = 0;
+        } else if (++healthyFrames >= 12) {
+            pressure = Math.max(0,pressure - 1);
+            healthyFrames = 0;
+        }
+    }
+
+    public int dutyPercent(long now) {
+        if (!active || lastFrame == 0) return 100;
+        if (now - lastFrame > 250_000_000L || pressure >= 6) return 35;
+        return pressure >= 2 ? 60 : 85;
+    }
+}

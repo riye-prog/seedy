@@ -5,9 +5,8 @@ import bedrock.generated.block_entry;
 import dev.seedy.recovery.BlockSearchProgress;
 import dev.seedy.recovery.RecoveryBudget;
 import dev.seedy.recovery.RecoveryDiagnostics;
+import dev.seedy.recovery.RecoveryWorkload;
 import dev.seedy.recovery.SeedHash;
-import com.google.gson.JsonObject;
-import com.google.gson.JsonParser;
 import net.fabricmc.loader.api.FabricLoader;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.multiplayer.ClientLevel;
@@ -20,6 +19,11 @@ import net.minecraft.world.level.chunk.ChunkAccess;
 import java.io.IOException;
 import java.lang.foreign.Arena;
 import java.lang.foreign.MemorySegment;
+import java.lang.foreign.ValueLayout;
+import java.lang.foreign.Linker;
+import java.lang.foreign.FunctionDescriptor;
+import java.lang.foreign.SymbolLookup;
+import java.lang.invoke.MethodHandle;
 import java.time.Duration;
 import java.util.ArrayDeque;
 import java.util.Arrays;
@@ -27,6 +31,7 @@ import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.Locale;
 import java.util.Map;
+import java.util.List;
 import java.util.Set;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
@@ -44,11 +49,9 @@ public final class BedrockRecovery implements AutoCloseable {
     private final RecoveryBudget budget = new RecoveryBudget(Duration.ofMinutes(10));
     private volatile OreVeinCheck oreVeinCheck;
     private static final org.slf4j.Logger LOGGER = org.slf4j.LoggerFactory.getLogger("Seedy");
-    private final ExecutorService worker = Executors.newSingleThreadExecutor(task -> {
-        Thread thread = Thread.ofPlatform().daemon().name("seedy-bedrock-recovery").unstarted(task);
-        thread.setPriority(Thread.NORM_PRIORITY);
-        return thread;
-    });
+    private final ExecutorService worker = Executors.newSingleThreadExecutor(RecoveryWorkload.threads("seedy-bedrock-recovery"));
+    private static volatile MethodHandle schedulingHandle;
+    private static int lastDuty = -1;
     private int observationCount;
     private int rawCount;
     private int oreCount;
@@ -137,6 +140,7 @@ public final class BedrockRecovery implements AutoCloseable {
             status = "Seed already verified";
             return;
         }
+        if (Workbench.INSTANCE.recovering()) return;
         ticks++;
         if (ticks % 20 == 1 && client.player != null) {
             int cx = client.player.getBlockX() >> 4;
@@ -231,7 +235,12 @@ public final class BedrockRecovery implements AutoCloseable {
     }
 
     static long[] retainNearbyVeins(long[] entries, java.util.function.BooleanSupplier continuing) {
-        Set<Long> nearby = new HashSet<>();
+        if (!continuing.getAsBoolean()) throw new java.util.concurrent.CancellationException();
+        return compactNearbyVeins(entries.clone(),continuing);
+    }
+
+    static long[] compactNearbyVeins(long[] entries, java.util.function.BooleanSupplier continuing) {
+        var nearby = new it.unimi.dsi.fastutil.longs.LongOpenHashSet(Math.clamp(entries.length / 128,16,65_536));
         int index = 0;
         for (long entry : entries) {
             if ((index++ & 4095) == 0 && !continuing.getAsBoolean()) throw new java.util.concurrent.CancellationException();
@@ -243,15 +252,15 @@ public final class BedrockRecovery implements AutoCloseable {
                 nearby.add(packedPosition(x + dx, y + dy, z + dz));
             }
         }
-        long[] kept = new long[entries.length];
         int count = 0;
+        index = 0;
         for (long entry : entries) {
-            if ((count & 4095) == 0 && !continuing.getAsBoolean()) throw new java.util.concurrent.CancellationException();
+            if ((index++ & 4095) == 0 && !continuing.getAsBoolean()) throw new java.util.concurrent.CancellationException();
             int type = (int)(entry & 15);
             if ((type == 2 || type == 3) && !nearby.contains(entry & ~15L)) continue;
-            kept[count++] = entry;
+            entries[count++] = entry;
         }
-        return Arrays.copyOf(kept, count);
+        return count == entries.length ? entries : Arrays.copyOf(entries,count);
     }
 
     static long[] sampleAbundant(long[] entries, int mask) {
@@ -277,13 +286,13 @@ public final class BedrockRecovery implements AutoCloseable {
     private static MemorySegment allocateEntries(long[] entries, Arena arena) {
         MemorySegment blocks = block_entry.allocateArray(entries.length, arena);
         for (int i = 0; i < entries.length; i++) {
-            if ((i & 4095) == 0 && !shouldContinueSearch()) throw new java.util.concurrent.CancellationException();
+            if ((i & 4095) == 0 && !RecoveryWorkload.checkpoint(() -> !shouldContinueSearch())) throw new java.util.concurrent.CancellationException();
             long packed = entries[i];
-            MemorySegment block = block_entry.asSlice(blocks, i);
-            block_entry.x(block, (int)(packed >> 38));
-            block_entry.z(block, (int)(packed << 26 >> 38));
-            block_entry.y(block, (int)(packed >> 4 & 255) - 64);
-            block_entry.typ(block, (int)(packed & 15));
+            long offset = (long)i * block_entry.sizeof();
+            blocks.set(ValueLayout.JAVA_INT,offset + block_entry.x$offset(),(int)(packed >> 38));
+            blocks.set(ValueLayout.JAVA_INT,offset + block_entry.z$offset(),(int)(packed << 26 >> 38));
+            blocks.set(ValueLayout.JAVA_INT,offset + block_entry.y$offset(),(int)(packed >> 4 & 255) - 64);
+            blocks.set(ValueLayout.JAVA_INT,offset + block_entry.typ$offset(),(int)(packed & 15));
         }
         return blocks;
     }
@@ -300,30 +309,30 @@ public final class BedrockRecovery implements AutoCloseable {
         runningGeneration = runGeneration;
         cancelRequested = false;
         progress.start(2, System.nanoTime());
-        long[] entries = new long[observationCount];
-        int offset = 0;
-        for (ChunkSample sample : samples.values()) {
-            System.arraycopy(sample.entries(), 0, entries, offset, sample.entries().length);
-            offset += sample.entries().length;
-        }
-        LOGGER.info("Starting block recovery: {} chunks, {} raw blocks, {} observations", evidenceChunks, rawCount, entries.length);
-        var snapshot = JsonParser.parseString(Workbench.INSTANCE.snapshot()).getAsJsonObject();
-        var diagnostic = new JsonObject();
-        for (String key : new String[]{"gameVersion", "generationVersion", "clientVersion", "serverVersion", "serverBrand", "protocolTargetVersion", "dimension"}) {
-            if (snapshot.has(key)) diagnostic.add(key, snapshot.get(key));
-        }
+        var evidence = List.copyOf(samples.values());
+        LOGGER.info("Starting block recovery: {} chunks, {} raw blocks, {} observations", evidenceChunks, rawCount, observationCount);
+        var diagnostic = Workbench.INSTANCE.recoveryContext();
         diagnostic.addProperty("seedHash", expectedHash);
         diagnostic.addProperty("chunks", evidenceChunks);
         diagnostic.addProperty("rawBlocks", rawCount);
         diagnostic.addProperty("sample", "unfiltered collector observations");
-        String generationVersion = snapshot.get("generationVersion").getAsString();
+        String generationVersion = diagnostic.get("generationVersion").getAsString();
         worker.submit(() -> {
             try {
                 nativeFailure.remove();
                 nativeMatched = false;
                 loadNative();
                 if (!shouldContinueSearch()) return;
-                long[] fullEntries = retainNearbyVeins(entries, BedrockRecovery::shouldContinueSearch);
+                int size = evidence.stream().mapToInt(sample -> sample.entries().length).reduce(0,Math::addExact);
+                long[] collected = new long[size];
+                int offset = 0;
+                for (ChunkSample sample : evidence) {
+                    if (!shouldContinueSearch()) return;
+                    System.arraycopy(sample.entries(),0,collected,offset,sample.entries().length);
+                    offset += sample.entries().length;
+                }
+                long[] fullEntries = compactNearbyVeins(collected,() -> RecoveryWorkload.checkpoint(() -> !shouldContinueSearch()));
+                collected = null;
                 oreVeinCheck = OreVeinCheck.fromEntries(fullEntries, generationVersion);
                 try (Arena arena = Arena.ofConfined()) {
                     MemorySegment blocks = allocateEntries(fullEntries, arena);
@@ -350,7 +359,7 @@ public final class BedrockRecovery implements AutoCloseable {
                     String failure = nativeFailure.get();
                     if (Workbench.INSTANCE.hasVerifiedSeed()) status = "Seed verified from nearby structures";
                     else if (cancelRequested) status = "Search stopped";
-                    else if (budget.expired()) status = "Search reached its 10-minute limit; block data may be hidden, modified, or from a different generation version";
+                    else if (budget.expired()) status = "Search reached its 10-minute limit; gameplay load, hidden blocks, or mismatched generation data may delay recovery";
                     else if (nativeMatched) status = "Seed found; verifying";
                     else status = failure == null ? "No matching seed from this block sample" : failure;
                 }
@@ -364,7 +373,7 @@ public final class BedrockRecovery implements AutoCloseable {
                     try {
                         diagnostic.addProperty("failure", status);
                         diagnostic.addProperty("pass", progress.view(System.nanoTime()).pass());
-                        RecoveryDiagnostics.write(FabricLoader.getInstance().getConfigDir().resolve("seedy/recovery"), entries, diagnostic);
+                        RecoveryDiagnostics.writeChunks(FabricLoader.getInstance().getConfigDir().resolve("seedy/recovery"),evidence.stream().map(ChunkSample::entries).toList(),diagnostic);
                         LOGGER.info("Saved block recovery data to config/seedy/recovery for command-line diagnosis");
                         status += ". Diagnostic saved in config/seedy/recovery";
                     } catch (IOException | RuntimeException error) { LOGGER.warn("Could not save block recovery diagnostic", error); }
@@ -407,7 +416,18 @@ public final class BedrockRecovery implements AutoCloseable {
         NativeLibraries.load(platform, z3Name);
         NativeLibraries.load(platform, solverName);
         BedrockNative.bedrockseed$crack$address();
+        schedulingHandle = Linker.nativeLinker().downcallHandle(SymbolLookup.loaderLookup().findOrThrow("seedy_recovery_budget"),FunctionDescriptor.ofVoid(ValueLayout.JAVA_INT,ValueLayout.JAVA_INT));
+        updateWorkBudget();
         nativeLoaded = true;
+    }
+
+    public static void updateWorkBudget() {
+        MethodHandle handle = schedulingHandle;
+        if (handle == null || !INSTANCE.running) return;
+        int duty = RecoveryWorkload.dutyPercent();
+        if (duty == lastDuty) return;
+        try { handle.invokeExact(duty,RecoveryWorkload.workerCount()); lastDuty = duty; }
+        catch (Throwable ignored) { }
     }
 
     public static void sendUpdate(String key, boolean logOnly, Object... values) {

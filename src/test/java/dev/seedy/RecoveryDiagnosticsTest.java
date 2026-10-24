@@ -21,7 +21,7 @@ class RecoveryDiagnosticsTest {
         long mask = (1L << 26) - 1;
         long first = ((-123L & mask) << 38) | ((-456L & mask) << 12) | (4L << 4) | 1;
         long second = (789L << 38) | (12L << 12) | (84L << 4) | 3;
-        RecoveryDiagnostics.write(directory, new long[]{first, second}, context);
+        RecoveryDiagnostics.writeChunks(directory, java.util.List.of(new long[]{first},new long[0],new long[]{second}), context);
         try (var input = new DataInputStream(new GZIPInputStream(Files.newInputStream(directory.resolve("last-blocks.bin.gz"))))) {
             assertEquals(-123, input.readInt());
             assertEquals(-60, input.readInt());

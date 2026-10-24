@@ -96,6 +96,15 @@ class BedrockRecoveryTest {
         assertEquals(3, BedrockRecovery.classify(Blocks.GRANITE, 20));
     }
 
+    @Test void compactionPreservesCollectorOwnershipAndReusesOwnedStorage() {
+        long[] source = {entry(0,-30,0,1),entry(1,-30,0,2),entry(20,-30,0,2),entry(0,-62,0,0)};
+        long[] original = source.clone();
+        assertArrayEquals(new long[]{source[0],source[1],source[3]},BedrockRecovery.retainNearbyVeins(source));
+        assertArrayEquals(original,source);
+        long[] complete = {source[0],source[1],source[3]};
+        org.junit.jupiter.api.Assertions.assertSame(complete,BedrockRecovery.compactNearbyVeins(complete,() -> true));
+    }
+
     @Test void invalidRawPatternsTrackRefreshAndReset() {
         var recovery = BedrockRecovery.INSTANCE;
         var factory = PalettedContainerFactory.create((RegistryAccess)WorldgenAdapter.registries());

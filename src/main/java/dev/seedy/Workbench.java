@@ -104,6 +104,19 @@ public final class Workbench implements AutoCloseable {
         publish(Minecraft.getInstance());
     }
     public boolean structureRecoveryRunning() { return recovery.running(); }
+    public boolean recovering() { return anyRecoveryRunning(); }
+    public JsonObject recoveryContext() {
+        var client = Minecraft.getInstance();
+        var result = new JsonObject();
+        result.addProperty("gameVersion",gameVersion);
+        result.addProperty("clientVersion",gameVersion);
+        result.addProperty("generationVersion",generationVersion);
+        result.addProperty("dimension",client.level == null ? "overworld" : client.level.dimension().identifier().getPath());
+        var server = client.getCurrentServer();
+        result.addProperty("serverVersion",server == null ? client.hasSingleplayerServer() ? gameVersion + " (local)" : "Not reported" : server.version == null ? "Not reported" : server.version.getString());
+        result.addProperty("protocolTargetVersion",net.fabricmc.loader.api.FabricLoader.getInstance().isModLoaded("viafabricplus") ? dev.seedy.recovery.WorldVersionCheck.translationTarget() : "");
+        return result;
+    }
     public String snapshot() {
         long now = System.nanoTime();
         if (snapshotDirty && (panelSnapshotAt == 0 || now - panelSnapshotAt >= 100_000_000L)) {

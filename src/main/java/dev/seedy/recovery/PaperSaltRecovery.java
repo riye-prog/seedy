@@ -8,12 +8,13 @@ import java.util.concurrent.Future;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.function.IntConsumer;
+import java.util.function.BooleanSupplier;
 
 public final class PaperSaltRecovery implements AutoCloseable {
     private static final long SALT_SPACE = 1L << 32;
-    private final int workerCount = Math.max(1, Math.min(6, Runtime.getRuntime().availableProcessors() - 2));
-    private final ExecutorService coordinator = Executors.newSingleThreadExecutor(Thread.ofPlatform().daemon().factory());
-    private final ExecutorService workers = Executors.newFixedThreadPool(workerCount, Thread.ofPlatform().daemon().factory());
+    private final int workerCount = RecoveryWorkload.workerCount();
+    private final ExecutorService coordinator = Executors.newSingleThreadExecutor(RecoveryWorkload.threads("seedy-paper-coordinator"));
+    private final ExecutorService workers = Executors.newFixedThreadPool(workerCount, RecoveryWorkload.threads("seedy-paper-worker"));
     private final AtomicLong generation = new AtomicLong();
     private final AtomicLong checked = new AtomicLong();
     private volatile boolean running;
@@ -49,9 +50,10 @@ public final class PaperSaltRecovery implements AutoCloseable {
                     jobs.add(workers.submit(() -> {
                         activeTasks.incrementAndGet();
                         try {
+                            BooleanSupplier cancelled = () -> generation.get() != task || hits.get() > 1;
                             for (long value = begin; value < end; value++) {
                                 if ((value & 8191) == 0) {
-                                    if (generation.get() != task || hits.get() > 1 || Thread.currentThread().isInterrupted()) return;
+                                    if (!RecoveryWorkload.checkpoint(cancelled)) return;
                                     checked.addAndGet(Math.min(8192, end - value));
                                 }
                                 int salt = (int)value;

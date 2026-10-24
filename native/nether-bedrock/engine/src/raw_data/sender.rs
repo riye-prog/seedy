@@ -3,6 +3,8 @@ use crate::CrackProgress;
 pub trait Sender: Clone + Send {
     fn send(&self, progress: CrackProgress) -> bool;
     fn cancelled(&self) -> bool { false }
+    fn worker_started(&self) { }
+    fn checkpoint(&self) -> bool { !self.cancelled() }
 }
 
 impl Sender for std::sync::mpsc::Sender<CrackProgress> {

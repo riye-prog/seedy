@@ -256,6 +256,23 @@ for old, new in (
         raise SystemExit("unexpected cancellation anchor: " + old)
     source = source.replace(old, new, 1)
 
+parallel_loop = "\t\tfor(beam_entry& to : next) {"
+loop_start = source.index(parallel_loop)
+pragma_start = source.rfind("#pragma omp parallel for", 0, loop_start)
+if pragma_start < 0 or source[pragma_start:loop_start].strip() != "#pragma omp parallel for":
+    raise SystemExit("unexpected beam parallel loop")
+brace_start = source.index("{", loop_start)
+depth = 1
+brace_end = brace_start + 1
+while depth:
+    depth += (source[brace_end] == "{") - (source[brace_end] == "}")
+    brace_end += 1
+if source[brace_end] != ";":
+    raise SystemExit("unexpected beam loop ending")
+source = source[:brace_end + 1] + "\n\t\t}" + source[brace_end + 1:]
+source = source[:pragma_start] + "#pragma omp parallel num_threads(recoveryWorkerCount())\n\t\t{\n\t\t\tRecoveryThreadPriority priority;\n\t\t\tRecoveryTimeSlice slice;\n#pragma omp for\n" + source[loop_start:]
+source = source.replace("\t\t\tif (!shouldContinueSearch()) continue;", "\t\t\tif (!slice.checkpoint(shouldContinueSearch)) continue;", 1)
+
 output.parent.mkdir(parents=True, exist_ok=True)
 if not output.exists() or output.read_text() != source:
     output.write_text(source)

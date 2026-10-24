@@ -9,7 +9,7 @@ output = Path(sys.argv[2])
 replacements = [
     (
         '#include "java_helper.h"\n',
-        '#include "java_helper.h"\n#include <algorithm>\n#include <atomic>\n#include <chrono>\n#include <system_error>\n#include <thread>\n#include <vector>\n',
+        '#include "java_helper.h"\n#include "recovery_scheduling.h"\n#include <algorithm>\n#include <atomic>\n#include <chrono>\n#include <system_error>\n#include <thread>\n#include <vector>\n',
     ),
     (
         'using simd = stdx::native_simd<uint64_t>;',
@@ -42,8 +42,11 @@ replacements = [
         '\tsendUpdate("commands.bedrockcrack.searchProgress", false, uint64_t{0}, limit);\n'
         '\tif(!shouldContinueSearch()) return;\n'
         '\tauto work = [&] {\n'
+        '\t\tRecoveryThreadPriority priority;\n'
+        '\t\tRecoveryTimeSlice slice;\n'
         '\t\tuint64_t localCompleted = 0;\n'
         '\t\twhile(!foundWorldSeed.load(std::memory_order_relaxed)) {\n'
+        '\t\t\tif (!slice.checkpoint(shouldContinueSearch)) { foundWorldSeed.store(true,std::memory_order_relaxed); break; }\n'
         '\t\t\tuint64_t start = nextGuess.fetch_add(batchSize, std::memory_order_relaxed);\n'
         '\t\t\tif(start >= limit) break;\n'
         '\t\t\tuint64_t end = std::min(start + batchSize, limit);\n'
@@ -64,8 +67,7 @@ replacements = [
         '\t\t}\n'
         '\t\tif(localCompleted) completed.fetch_add(localCompleted, std::memory_order_relaxed);\n'
         '\t};\n'
-        '\tunsigned int cores = std::thread::hardware_concurrency();\n'
-        '\tunsigned int workerCount = std::clamp(cores > 1 ? cores - 1 : 1u, 1u, 32u);\n'
+        '\tunsigned int workerCount = recoveryWorkerCount();\n'
         '\tstd::vector<std::thread> workers;\n'
         '\tworkers.reserve(workerCount - 1);\n'
         '\tfor(unsigned int i = 1; i < workerCount; ++i) {\n'

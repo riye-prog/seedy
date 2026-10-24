@@ -7,9 +7,54 @@ use sha2::{Digest, Sha256};
 use std::collections::HashSet;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::mpsc::{channel, Sender as ChannelSender};
+use std::cell::Cell;
+use std::time::{Duration, Instant};
 
 static CANCELLED: AtomicBool = AtomicBool::new(false);
 static PROGRESS: AtomicU64 = AtomicU64::new(0);
+static DUTY: AtomicU64 = AtomicU64::new(100);
+thread_local! { static SLICE: Cell<Instant> = Cell::new(Instant::now()); }
+
+fn background_priority() {
+    #[cfg(target_os = "macos")]
+    unsafe {
+        extern "C" { fn pthread_set_qos_class_self_np(class: u32, priority: i32) -> i32; }
+        pthread_set_qos_class_self_np(17,0);
+    }
+    #[cfg(target_os = "windows")]
+    unsafe {
+        #[link(name = "kernel32")]
+        extern "system" {
+            fn GetCurrentThread() -> *mut std::ffi::c_void;
+            fn GetThreadPriority(thread: *mut std::ffi::c_void) -> i32;
+            fn SetThreadPriority(thread: *mut std::ffi::c_void, priority: i32) -> i32;
+        }
+        let thread = GetCurrentThread();
+        if GetThreadPriority(thread) > -1 { SetThreadPriority(thread,-1); }
+    }
+}
+
+fn checkpoint() -> bool {
+    if CANCELLED.load(Ordering::Relaxed) { return false; }
+    SLICE.with(|slice| {
+        let work = slice.get().elapsed();
+        if work < Duration::from_millis(2) { return true; }
+        let duty = DUTY.load(Ordering::Relaxed).clamp(1,100);
+        let rest = (work.as_nanos() * (100 - duty) as u128 / duty as u128).min(8_000_000) as u64;
+        let until = Instant::now() + Duration::from_nanos(rest);
+        loop {
+            let remaining = until.saturating_duration_since(Instant::now());
+            if remaining.is_zero() { break; }
+            std::thread::sleep(remaining.min(Duration::from_millis(1)));
+            if CANCELLED.load(Ordering::Relaxed) { return false; }
+        }
+        slice.set(Instant::now());
+        true
+    })
+}
+
+#[no_mangle]
+pub extern "C" fn seedy_nether_budget(duty: u32) { DUTY.store(duty.clamp(1,100) as u64,Ordering::Relaxed); }
 
 #[derive(Clone)]
 struct ProgressSender {
@@ -18,6 +63,8 @@ struct ProgressSender {
 
 impl Sender for ProgressSender {
     fn cancelled(&self) -> bool { CANCELLED.load(Ordering::Relaxed) }
+    fn worker_started(&self) { background_priority(); }
+    fn checkpoint(&self) -> bool { checkpoint() }
 
     fn send(&self, event: CrackProgress) -> bool {
         if CANCELLED.load(Ordering::Relaxed) {
@@ -56,6 +103,7 @@ pub unsafe extern "C" fn seedy_nether_crack(
     expected_hash: u64,
     output: *mut i64,
 ) -> i64 {
+    background_priority();
     if input.is_null() || output.is_null() || count == 0 || count > 8192 {
         return -1;
     }
@@ -87,7 +135,7 @@ pub unsafe extern "C" fn seedy_nether_crack(
     let (channel, receiver) = channel();
     search_bedrock_pattern(
         &blocks,
-        threads.clamp(1, 64),
+        threads.clamp(1, 4),
         BedrockGeneration::Normal,
         OutputMode::StructureSeed,
         ProgressSender { channel },
@@ -108,7 +156,7 @@ pub unsafe extern "C" fn seedy_nether_crack(
                 }
                 let lower = seed & ((1_u64 << 48) - 1);
                 for upper in 0..65536_u64 {
-                    if upper & 255 == 0 && CANCELLED.load(Ordering::Relaxed) { break; }
+                    if upper & 255 == 0 && !checkpoint() { break; }
                     let candidate = (upper << 48) | lower;
                     let digest = Sha256::digest(candidate.to_le_bytes());
                     let candidate_hash = u64::from_le_bytes(digest[..8].try_into().unwrap());

@@ -15,21 +15,27 @@ public final class RecoveryDiagnostics {
     private RecoveryDiagnostics() { }
 
     public static void write(Path directory, long[] entries, JsonObject context) throws IOException {
+        writeChunks(directory,java.util.List.of(entries),context);
+    }
+
+    public static void writeChunks(Path directory, Iterable<long[]> chunks, JsonObject context) throws IOException {
         Files.createDirectories(directory);
         Path temporary = directory.resolve("last-blocks.bin.gz.tmp");
+        long count = 0;
         try (var output = new DataOutputStream(new GZIPOutputStream(new BufferedOutputStream(Files.newOutputStream(temporary)), 65536))) {
-            for (long packed : entries) {
+            for (long[] entries : chunks) for (long packed : entries) {
                 output.writeInt((int)(packed >> 38));
                 output.writeInt((int)(packed >> 4 & 255) - 64);
                 output.writeInt((int)(packed << 26 >> 38));
                 output.writeInt((int)(packed & 15));
+                count++;
             }
         }
         Files.move(temporary, directory.resolve("last-blocks.bin.gz"), StandardCopyOption.REPLACE_EXISTING);
         context.addProperty("format", "seedy-blocks-v1");
         context.addProperty("recordByteOrder", "big-endian");
         context.addProperty("recordFields", "x,y,z,type; four signed 32-bit integers");
-        context.addProperty("observations", entries.length);
+        context.addProperty("observations", count);
         context.addProperty("capturedAt", Instant.now().toString());
         Path metadata = directory.resolve("last-blocks.json.tmp");
         Files.writeString(metadata, new GsonBuilder().setPrettyPrinting().create().toJson(context));

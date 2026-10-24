@@ -22,6 +22,7 @@ import java.util.Locale;
 import java.util.Set;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
+import dev.seedy.recovery.RecoveryWorkload;
 
 public final class NetherBedrockRecovery implements AutoCloseable {
     public static final NetherBedrockRecovery INSTANCE = new NetherBedrockRecovery();
@@ -30,11 +31,13 @@ public final class NetherBedrockRecovery implements AutoCloseable {
     private static final int CHUNKS_PER_ATTEMPT = 8;
     private static final int MIN_BEDROCK_PER_SIDE = 80;
     private static final long SEARCH_SPACE = 1L << 48;
-    private static final ExecutorService WORKER = Executors.newSingleThreadExecutor(task -> Thread.ofPlatform().daemon().name("seedy-nether-recovery").unstarted(task));
+    private static final ExecutorService WORKER = Executors.newSingleThreadExecutor(RecoveryWorkload.threads("seedy-nether-recovery"));
     private static volatile MethodHandle crackHandle;
     private static volatile MethodHandle progressHandle;
     private static volatile MethodHandle cancelHandle;
     private static volatile MethodHandle resetHandle;
+    private static volatile MethodHandle schedulingHandle;
+    private static int lastDuty = -1;
     private final ArrayDeque<ChunkPos> queue = new ArrayDeque<>();
     private final Set<Long> queued = new HashSet<>();
     private final Set<Long> scanned = new HashSet<>();
@@ -88,6 +91,7 @@ public final class NetherBedrockRecovery implements AutoCloseable {
             else if (!status.startsWith("Seed recovered")) status = "Seed already verified";
             return;
         }
+        if (Workbench.INSTANCE.recovering()) return;
         ticks++;
         if (ticks % 20 == 1 && client.player != null && scanned.size() < MAX_CHUNKS) {
             int cx = client.player.getBlockX() >> 4;
@@ -164,7 +168,8 @@ public final class NetherBedrockRecovery implements AutoCloseable {
                 loadNative();
                 resetHandle.invokeExact();
                 if (cancelRequested || runGeneration != generation) return;
-                int threads = Math.max(1, Math.min(6, Runtime.getRuntime().availableProcessors() - 2));
+                int threads = RecoveryWorkload.workerCount();
+                updateWorkBudget();
                 try (Arena arena = Arena.ofConfined()) {
                     MemorySegment blocks = arena.allocate(ValueLayout.JAVA_INT, entries.length);
                     blocks.copyFrom(MemorySegment.ofArray(entries));
@@ -217,6 +222,16 @@ public final class NetherBedrockRecovery implements AutoCloseable {
         progressHandle = linker.downcallHandle(symbols.findOrThrow("seedy_nether_progress"), FunctionDescriptor.of(ValueLayout.JAVA_LONG));
         cancelHandle = linker.downcallHandle(symbols.findOrThrow("seedy_nether_cancel"), FunctionDescriptor.ofVoid());
         resetHandle = linker.downcallHandle(symbols.findOrThrow("seedy_nether_reset"), FunctionDescriptor.ofVoid());
+        schedulingHandle = linker.downcallHandle(symbols.findOrThrow("seedy_nether_budget"),FunctionDescriptor.ofVoid(ValueLayout.JAVA_INT));
+    }
+
+    public static void updateWorkBudget() {
+        MethodHandle handle = schedulingHandle;
+        if (handle == null || !INSTANCE.running) return;
+        int duty = RecoveryWorkload.dutyPercent();
+        if (duty == lastDuty) return;
+        try { handle.invokeExact(duty); lastDuty = duty; }
+        catch (Throwable ignored) { }
     }
 
     private static void cancelNative() {

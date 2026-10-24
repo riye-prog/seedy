@@ -13,6 +13,11 @@
 
 static JavaVM *javaVm = nullptr;
 static jclass recoveryClass = nullptr;
+static jmethodID stateMethod = nullptr, seedMethod = nullptr, continuationMethod = nullptr;
+static std::atomic<uint64_t> attachedThreads{0};
+
+extern "C" JNIEXPORT void seedy_recovery_budget(int duty, int workers) { setRecoveryBudget(duty,workers); }
+extern "C" JNIEXPORT uint64_t seedy_recovery_attachments() { return attachedThreads.load(std::memory_order_relaxed); }
 
 extern "C" JNIEXPORT jint JNICALL JNI_OnLoad(JavaVM *vm, void *) {
     javaVm = vm;
@@ -22,64 +27,65 @@ extern "C" JNIEXPORT jint JNICALL JNI_OnLoad(JavaVM *vm, void *) {
     if (localClass == nullptr) return JNI_ERR;
     recoveryClass = static_cast<jclass>(env->NewGlobalRef(localClass));
     env->DeleteLocalRef(localClass);
+    stateMethod = env->GetStaticMethodID(recoveryClass,"matchesRandomState","(JJ)Z");
+    seedMethod = env->GetStaticMethodID(recoveryClass,"matchesWorldSeed","(J)Z");
+    continuationMethod = env->GetStaticMethodID(recoveryClass,"shouldContinueSearch","()Z");
+    if (!stateMethod || !seedMethod || !continuationMethod) return JNI_ERR;
 #ifdef _OPENMP
-    int threads = static_cast<int>(std::thread::hardware_concurrency());
-    omp_set_num_threads(std::clamp(threads - 2, 1, 6));
+    omp_set_num_threads(recoveryWorkerCount());
 #endif
     return JNI_VERSION_24;
 }
 
-static JNIEnv *environment(bool &attached) {
+struct RecoveryJniThread {
     JNIEnv *env = nullptr;
-    jint result = javaVm->GetEnv(reinterpret_cast<void **>(&env), JNI_VERSION_24);
-    if (result == JNI_EDETACHED) {
-        if (javaVm->AttachCurrentThread(reinterpret_cast<void **>(&env), nullptr) != JNI_OK) return nullptr;
-        attached = true;
-    } else if (result != JNI_OK) {
-        return nullptr;
+    bool attached = false;
+    RecoveryJniThread() {
+        jint result = javaVm->GetEnv(reinterpret_cast<void **>(&env),JNI_VERSION_24);
+        if (result == JNI_EDETACHED) {
+            attached = javaVm->AttachCurrentThreadAsDaemon(reinterpret_cast<void **>(&env),nullptr) == JNI_OK;
+            if (attached) attachedThreads.fetch_add(1,std::memory_order_relaxed);
+            else env = nullptr;
+        } else if (result != JNI_OK) env = nullptr;
     }
-    return env;
+    ~RecoveryJniThread() { if (attached) javaVm->DetachCurrentThread(); }
+};
+
+static JNIEnv *environment() {
+    thread_local RecoveryJniThread thread;
+    return thread.env;
 }
 
 bool matchesRandomState(uint64_t low, uint64_t high) {
-    bool attached = false;
-    JNIEnv *env = environment(attached);
+    JNIEnv *env = environment();
     if (env == nullptr) return false;
-    jmethodID match = env->GetStaticMethodID(recoveryClass, "matchesRandomState", "(JJ)Z");
-    bool result = match != nullptr && env->CallStaticBooleanMethod(recoveryClass, match, static_cast<jlong>(low), static_cast<jlong>(high));
+    bool result = env->CallStaticBooleanMethod(recoveryClass,stateMethod,static_cast<jlong>(low),static_cast<jlong>(high));
     if (env->ExceptionCheck()) {
         env->ExceptionClear();
         result = false;
     }
-    if (attached) javaVm->DetachCurrentThread();
     return result;
 }
 
 bool matchesWorldSeed(uint64_t seed) {
-    bool attached = false;
-    JNIEnv *env = environment(attached);
+    JNIEnv *env = environment();
     if (env == nullptr) return false;
-    jmethodID match = env->GetStaticMethodID(recoveryClass, "matchesWorldSeed", "(J)Z");
-    bool result = match != nullptr && env->CallStaticBooleanMethod(recoveryClass, match, static_cast<jlong>(seed));
+    bool result = env->CallStaticBooleanMethod(recoveryClass,seedMethod,static_cast<jlong>(seed));
     if (env->ExceptionCheck()) {
         env->ExceptionClear();
         result = false;
     }
-    if (attached) javaVm->DetachCurrentThread();
     return result;
 }
 
 static bool readContinuation() {
-    bool attached = false;
-    JNIEnv *env = environment(attached);
+    JNIEnv *env = environment();
     if (env == nullptr) return false;
-    jmethodID method = env->GetStaticMethodID(recoveryClass, "shouldContinueSearch", "()Z");
-    bool result = method != nullptr && env->CallStaticBooleanMethod(recoveryClass, method);
+    bool result = env->CallStaticBooleanMethod(recoveryClass,continuationMethod);
     if (env->ExceptionCheck()) {
         env->ExceptionClear();
         result = false;
     }
-    if (attached) javaVm->DetachCurrentThread();
     return result;
 }
 
@@ -94,6 +100,7 @@ void startRecoveryCancellation() {
         monitoring.store(true, std::memory_order_release);
         monitorStopped.store(false, std::memory_order_relaxed);
         cancellationMonitor = std::thread([] {
+            RecoveryThreadPriority priority;
             while (!monitorStopped.load(std::memory_order_relaxed) && continuation.load(std::memory_order_relaxed)) {
                 std::this_thread::sleep_for(std::chrono::milliseconds(20));
                 if (!readContinuation()) continuation.store(false, std::memory_order_relaxed);
@@ -124,8 +131,7 @@ static void addArgument(JNIEnv *env, jobjectArray values, int index, uint64_t va
 
 template<typename... Args>
 void sendUpdate(const char *key, bool logOnly, Args... args) {
-    bool attached = false;
-    JNIEnv *env = environment(attached);
+    JNIEnv *env = environment();
     if (env == nullptr) return;
     jclass objectClass = env->FindClass("java/lang/Object");
     jclass longClass = env->FindClass("java/lang/Long");
@@ -141,7 +147,6 @@ void sendUpdate(const char *key, bool logOnly, Args... args) {
     env->DeleteLocalRef(values);
     env->DeleteLocalRef(longClass);
     env->DeleteLocalRef(objectClass);
-    if (attached) javaVm->DetachCurrentThread();
 }
 
 template void sendUpdate<>(const char *, bool);

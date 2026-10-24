@@ -238,6 +238,7 @@ pub fn flat_search<S: Sender + 'static>(seed_list: &[u64], roof_blocks: Arc<Vec<
     let check_seed = |seed, blocks: &[CheckObject]| blocks.iter().all(|block| !block.check(seed));
 
     for (index, seed) in seed_list.iter().enumerate() {
+        if index & 4095 == 0 && !sender.checkpoint() { return; }
         let rand = next_long(*seed);
         let roof_seed = next_long(rand ^ ROOF_HASH) & MASK48;
         let floor_seed = next_long(rand ^ FLOOR_HASH) & MASK48;
