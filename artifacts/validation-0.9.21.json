@@ -1,28 +1,14 @@
 {
   "version": "0.9.21",
-  "source_commit": "236eae2a2ad02df116ab6280101cec2627351d4c",
-  "minecraft": {
-    "26.2": {
-      "tests": 83,
-      "failures": 0,
-      "errors": 0,
-      "skipped": 1
-    },
-    "26.3": {
-      "tests": 82,
-      "failures": 0,
-      "errors": 0,
-      "skipped": 1
-    }
-  },
+  "source_commit": "03c87bc9b3f624d73bf6834503a4a9ebdb1aed27",
   "jars": {
     "seedy-0.9.21+26.2.jar": {
-      "bytes": 38148721,
-      "sha256": "cfaa40641db957de8149f1ec77ab1f59c5233a580d9950e5ce35d8bc692521ca"
+      "bytes": 38149022,
+      "sha256": "a0a350738ab88e286684fc594f46212e81fe6e4fd404a98bb419565e2deb1bef"
     },
     "seedy-0.9.21+26.3.jar": {
-      "bytes": 38147928,
-      "sha256": "a7f1e14d547f75773f19d32dfafd4162a862f185ad79a0b18e9da156a67e762c"
+      "bytes": 38148227,
+      "sha256": "f46803c87b34ab2818b7c88756350d58a86dd82687144ec98f6bfd2a53446a30"
     }
   },
   "native_builds": [
@@ -159,11 +145,40 @@
     ],
     "macos": "inherited QoS class with relative priority -15",
     "windows": "below normal worker priority",
-    "game_thread_priority_unchanged": "tested"
+    "game_thread_priority_unchanged": "tested",
+    "fps_limit": "current Minecraft limit including background/AFK limits; unlimited is excluded from the cap floor"
   },
   "scope": [
     "no Minecraft instance launched by the agent",
     "GUI native payloads unchanged",
     "Windows binaries cross-compiled; Windows runtime remains CI/tester validation"
-  ]
+  ],
+  "minecraft_full_suite_before_fps_limit_followup": {
+    "26.2": {
+      "tests": 83,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 1
+    },
+    "26.3": {
+      "tests": 82,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 1
+    }
+  },
+  "fps_limit_followup": {
+    "26.2": {
+      "tests": 6,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0
+    },
+    "26.3": {
+      "tests": 6,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0
+    }
+  }
 }
