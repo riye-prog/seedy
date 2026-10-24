@@ -1,0 +1,169 @@
+{
+  "version": "0.9.21",
+  "source_commit": "236eae2a2ad02df116ab6280101cec2627351d4c",
+  "minecraft": {
+    "26.2": {
+      "tests": 83,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 1
+    },
+    "26.3": {
+      "tests": 82,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 1
+    }
+  },
+  "jars": {
+    "seedy-0.9.21+26.2.jar": {
+      "bytes": 38148721,
+      "sha256": "cfaa40641db957de8149f1ec77ab1f59c5233a580d9950e5ce35d8bc692521ca"
+    },
+    "seedy-0.9.21+26.3.jar": {
+      "bytes": 38147928,
+      "sha256": "a7f1e14d547f75773f19d32dfafd4162a862f185ad79a0b18e9da156a67e762c"
+    }
+  },
+  "native_builds": [
+    "macos-arm64",
+    "macos-x86_64",
+    "windows-x86_64"
+  ],
+  "native_runtime_checks": {
+    "kernel_constraints_priority_restore_and_scheduling": {
+      "macos-arm64": "3 passed",
+      "macos-x86_64": "3 passed"
+    },
+    "nbc": {
+      "arm": [
+        {
+          "cancel_attempt": 1,
+          "stop_ms": 1.2
+        },
+        {
+          "cancel_attempt": 2,
+          "stop_ms": 1.4
+        },
+        {
+          "cancel_attempt": 3,
+          "stop_ms": 1.23
+        },
+        {
+          "observations": 36,
+          "result": 1,
+          "seed": 765906787396911863,
+          "matches": true,
+          "seconds": 13.38
+        }
+      ],
+      "intel": [
+        {
+          "cancel_attempt": 1,
+          "stop_ms": 1.39
+        },
+        {
+          "cancel_attempt": 2,
+          "stop_ms": 1.11
+        },
+        {
+          "cancel_attempt": 3,
+          "stop_ms": 1.5
+        },
+        {
+          "observations": 36,
+          "result": 1,
+          "seed": 765906787396911863,
+          "matches": true,
+          "seconds": 15.2
+        }
+      ]
+    }
+  },
+  "loader_probes": {
+    "26.2-vulkan": "passed",
+    "26.3-vulkan": "passed",
+    "26.3-mcopt-0.3.0-alpha.2": "passed",
+    "minecraft_main_invoked": false
+  },
+  "overworld_replay": {
+    "input": "1000 captured paper 26.2 anti-xray mode 1 chunks",
+    "observations": 2101744,
+    "expected_seed": "-7619526468459309251",
+    "solver_input": "observations and seed hash; the solver was not supplied the seed",
+    "reference_0.9.19_native": {
+      "limited": false,
+      "seconds": 426.747067917,
+      "hashVerified": true,
+      "frames": 48922,
+      "p95FrameDelayMs": 12.747765,
+      "p99FrameDelayMs": 31.09326,
+      "maxFrameDelayMs": 414.57751,
+      "first30sP95DelayMs": 21.12274,
+      "first30sP99DelayMs": 38.155057,
+      "first30sThreads": 945,
+      "threadsStarted": 16185,
+      "minimumDuty": 100,
+      "stopMs": 0.28175
+    },
+    "historical_0.9.20": {
+      "limited": true,
+      "seconds": 535.02758075,
+      "hashVerified": true,
+      "frames": 64031,
+      "p95FrameDelayMs": 1.650127,
+      "p99FrameDelayMs": 2.211553,
+      "maxFrameDelayMs": 187.431094,
+      "first30sP95DelayMs": 1.664713,
+      "first30sP99DelayMs": 9.0497,
+      "first30sThreads": 2,
+      "threadsStarted": 5,
+      "minimumDuty": 35,
+      "stopMs": 0.028375,
+      "nativeAttachments": 4,
+      "workers": 4
+    },
+    "updated": {
+      "limited": true,
+      "seconds": 306.56549175,
+      "hashVerified": true,
+      "frames": 36525,
+      "p95FrameDelayMs": 1.698846,
+      "p99FrameDelayMs": 8.662216,
+      "maxFrameDelayMs": 127.948312,
+      "first30sP95DelayMs": 1.685564,
+      "first30sP99DelayMs": 3.025161,
+      "first30sThreads": 2,
+      "threadsStarted": 7,
+      "minimumDuty": 35,
+      "averageDuty": 94.32265571526352,
+      "stopMs": 0.285042,
+      "nativeAttachments": 6,
+      "workers": 6
+    },
+    "comparison_scope": "fixed captured input and 120 Hz foreground simulation; changing background load while the user continued playing Minecraft, so timings are approximate",
+    "reference_scope": "0.9.19 native engine with the Java harness; reference warmup was unpaced, updated warmup is paced at 120 Hz",
+    "fps_scope": "synthetic foreground scheduling delay, not measured gameplay FPS"
+  },
+  "throttled_obc_stop_ms": [
+    9,
+    39,
+    166
+  ],
+  "scheduling_policy": {
+    "worker_limit": "at least one, otherwise available processors minus two, capped at six",
+    "healthy_frame_duty_percent": 100,
+    "contention_duty_percent": [
+      60,
+      35
+    ],
+    "macos": "inherited QoS class with relative priority -15",
+    "windows": "below normal worker priority",
+    "game_thread_priority_unchanged": "tested"
+  },
+  "scope": [
+    "no Minecraft instance launched by the agent",
+    "GUI native payloads unchanged",
+    "Windows binaries cross-compiled; Windows runtime remains CI/tester validation"
+  ]
+}
